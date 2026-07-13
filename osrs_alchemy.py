@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 import os
 from dataclasses import dataclass, field
 import re
-from ge_tracker import OSRSAlchemyFlippingCalculator
+
+from ge-tracker import OSRSAlchemyFlippingCalculator
+
 
 @dataclass
 class ChannelConfig:
