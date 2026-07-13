@@ -1,4 +1,3 @@
-import requests
 import json
 import time
 import statistics
@@ -6,21 +5,13 @@ from typing import Dict, List, Optional
 import pandas as pd
 import math
 
+from api.client import OSRSAPIClient
+
 class OSRSAlchemyFlippingCalculator:
     def __init__(self):
-        # API endpoints
-        self.base_url = "https://prices.runescape.wiki/api/v1/osrs"
-        self.mapping_url = f"{self.base_url}/mapping"
-        self.latest_prices_url = f"{self.base_url}/latest"
-        self.hourly_prices_url = f"{self.base_url}/1h"
-        self.five_min_prices_url = f"{self.base_url}/5m"
-        self.timeseries_url = f"{self.base_url}/timeseries"
-        
-        # Set a descriptive User-Agent as required by the API guidelines
-        self.headers = {
-            'User-Agent': 'OSRS_Alchemy_Calculator - Educational/Personal Use - Python Script - @lovvu0173 on Discord.'
-        }
-        
+        # API client for HTTP requests
+        self.client = OSRSAPIClient()
+
         # Cost of nature rune (you can update this manually or fetch it dynamically)
         self.nature_rune_cost = 125  # Current cost from my head
         
@@ -88,130 +79,110 @@ class OSRSAlchemyFlippingCalculator:
         Fetch item mapping data including high alchemy values
         Returns True if successful, False otherwise
         """
-        try:
-            print("Fetching item mapping data...")
-            response = requests.get(self.mapping_url, headers=self.headers)
-            response.raise_for_status()
-            
-            mapping_data = response.json()
-            
-            # Convert list to dict for easier lookup by item ID
-            for item in mapping_data:
-                self.item_mapping[item['id']] = {
-                    'name': item.get('name', 'Unknown'),
-                    'examine': item.get('examine', ''),
-                    'members': item.get('members', False),
-                    'lowalch': item.get('lowalch', 0),
-                    'highalch': item.get('highalch', 0),
-                    'limit': item.get('limit', 0),  # Default to 0 if no limit (untradeable items)
-                    'value': item.get('value', 0),
-                    'icon': item.get('icon', '')
-                }
-            
-            print(f"Successfully fetched mapping for {len(self.item_mapping)} items")
-            return True
-            
-        except requests.RequestException as e:
-            print(f"Error fetching item mapping: {e}")
+        print("Fetching item mapping data...")
+        mapping_data = self.client.fetch_item_mapping()
+
+        if mapping_data is None:
+            print("Error fetching item mapping")
             return False
+
+        # Convert list to dict for easier lookup by item ID
+        for item in mapping_data:
+            self.item_mapping[item['id']] = {
+                'name': item.get('name', 'Unknown'),
+                'examine': item.get('examine', ''),
+                'members': item.get('members', False),
+                'lowalch': item.get('lowalch', 0),
+                'highalch': item.get('highalch', 0),
+                'limit': item.get('limit', 0),  # Default to 0 if no limit (untradeable items)
+                'value': item.get('value', 0),
+                'icon': item.get('icon', '')
+            }
+
+        print(f"Successfully fetched mapping for {len(self.item_mapping)} items")
+        return True
     
     def fetch_volume_data(self) -> bool:
         """
         Fetch volume data from 1-hour endpoint
         Returns True if successful, False otherwise
         """
-        try:
-            print("Fetching volume data...")
-            response = requests.get(self.hourly_prices_url, headers=self.headers)
-            response.raise_for_status()
-            
-            hourly_data = response.json()['data']
-            
-            # Convert to dict and extract volume information
-            for item_id_str, data in hourly_data.items():
-                if 'avgHighPrice' in data and 'avgLowPrice' in data and 'highPriceVolume' in data and 'lowPriceVolume' in data:
-                    item_id = int(item_id_str)
-                    # Use total volume (high + low price volumes)
-                    total_volume = (data.get('highPriceVolume', 0) or 0) + (data.get('lowPriceVolume', 0) or 0)
-                    self.volume_data[item_id] = total_volume
-            
-            print(f"Successfully fetched volume data for {len(self.volume_data)} items")
-            return True
-            
-        except requests.RequestException as e:
-            print(f"Error fetching volume data: {e}")
+        print("Fetching volume data...")
+        hourly_data = self.client.fetch_volume_data()
+
+        if hourly_data is None:
+            print("Error fetching volume data")
             return False
+
+        # Convert to dict and extract volume information
+        for item_id_str, data in hourly_data.items():
+            if 'avgHighPrice' in data and 'avgLowPrice' in data and 'highPriceVolume' in data and 'lowPriceVolume' in data:
+                item_id = int(item_id_str)
+                # Use total volume (high + low price volumes)
+                total_volume = (data.get('highPriceVolume', 0) or 0) + (data.get('lowPriceVolume', 0) or 0)
+                self.volume_data[item_id] = total_volume
+
+        print(f"Successfully fetched volume data for {len(self.volume_data)} items")
+        return True
     
     def fetch_current_prices(self) -> bool:
         """
         Fetch current Grand Exchange prices
         Returns True if successful, False otherwise
         """
-        try:
-            print("Fetching current GE prices...")
-            response = requests.get(self.latest_prices_url, headers=self.headers)
-            response.raise_for_status()
-            
-            self.current_prices = response.json()['data']
-            print(f"Successfully fetched prices for {len(self.current_prices)} items")
-            return True
-            
-        except requests.RequestException as e:
-            print(f"Error fetching current prices: {e}")
+        print("Fetching current GE prices...")
+        price_data = self.client.fetch_current_prices()
+
+        if price_data is None:
+            print("Error fetching current prices")
             return False
+
+        self.current_prices = price_data
+        print(f"Successfully fetched prices for {len(self.current_prices)} items")
+        return True
 
     def fetch_five_minute_data(self) -> bool:
         """
         NEW: Fetch 5-minute price data for trend analysis
         Returns True if successful, False otherwise
         """
-        try:
-            print("Fetching 5-minute price data for trend analysis...")
-            response = requests.get(self.five_min_prices_url, headers=self.headers)
-            response.raise_for_status()
-            
-            five_min_data = response.json()['data']
-            
-            # Convert to dict and extract price information
-            for item_id_str, data in five_min_data.items():
-                if 'avgHighPrice' in data and 'avgLowPrice' in data:
-                    item_id = int(item_id_str)
-                    self.five_min_data[item_id] = {
-                        'high': data.get('avgHighPrice'),
-                        'low': data.get('avgLowPrice'),
-                        'high_volume': data.get('highPriceVolume', 0) or 0,
-                        'low_volume': data.get('lowPriceVolume', 0) or 0,
-                        'timestamp': data.get('timestamp')
-                    }
-            
-            print(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
-            return True
-            
-        except requests.RequestException as e:
-            print(f"Error fetching 5-minute data: {e}")
+        print("Fetching 5-minute price data for trend analysis...")
+        five_min_data = self.client.fetch_five_minute_data()
+
+        if five_min_data is None:
+            print("Error fetching 5-minute data")
             return False
+
+        # Convert to dict and extract price information
+        for item_id_str, data in five_min_data.items():
+            if 'avgHighPrice' in data and 'avgLowPrice' in data:
+                item_id = int(item_id_str)
+                self.five_min_data[item_id] = {
+                    'high': data.get('avgHighPrice'),
+                    'low': data.get('avgLowPrice'),
+                    'high_volume': data.get('highPriceVolume', 0) or 0,
+                    'low_volume': data.get('lowPriceVolume', 0) or 0,
+                    'timestamp': data.get('timestamp')
+                }
+
+        print(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
+        return True
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
         """
         Fetch historical price data for an item
-        
+
         Args:
             item_id: Item ID to fetch data for
             timestep: Time resolution (24h, 6h, 1h, 5m)
-            
+
         Returns:
             List of price data points
         """
-        try:
-            params = {"id": item_id, "timestep": timestep}
-            response = requests.get(self.timeseries_url, headers=self.headers, params=params)
-            response.raise_for_status()
-            
-            return response.json().get("data", [])
-            
-        except requests.RequestException as e:
-            print(f"Error fetching timeseries for item {item_id}: {e}")
-            return []
+        data = self.client.fetch_timeseries(item_id, timestep)
+        if not data:
+            print(f"Error fetching timeseries for item {item_id}")
+        return data
     
     def detect_pump_and_dump(self, history_prices: List[Dict], current_high: int, current_low: int) -> tuple:
         """
