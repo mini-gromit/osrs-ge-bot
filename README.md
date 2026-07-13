@@ -28,7 +28,7 @@ module structure.
 
 4. Run the bot:
    ```bash
-   python osrs-alchemy.py
+   python osrs_alchemy.py
    ```
 
 5. In your Discord channel, run:
@@ -41,7 +41,7 @@ module structure.
 
 Run the standalone analysis CLI (no Discord needed):
 ```bash
-python ge-tracker.py
+python ge_tracker.py
 ```
 
 ## More info
