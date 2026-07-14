@@ -411,74 +411,6 @@ class OSRSAlchemyFlippingCalculator:
             print(f"Returning {len(top_candidates[:limit])} items with basic scoring")
             return top_candidates[:limit]
 
-    def display_alchemy_results(self, items: List[Dict], show_count: int = 20):
-        """Display alchemy results in a formatted table"""
-        if not items:
-            print("No profitable alchemizable items found with the given criteria.")
-            return
-            
-        print(f"\nTop {min(show_count, len(items))} High Alchemy Opportunities (Alchemizable Items Only):")
-        print("-" * 140)
-        print(f"{'Rank':<4} {'Item Name':<18} {'Buy Price':<10} {'Alch Value':<10} {'Profit':<8} {'ROI%':<5} {'Limit':<6} {'Max Profit':<10} {'Volume/hr':<10} {'Members'}")
-        print("-" * 140)
-        
-        for i, item in enumerate(items[:show_count], 1):
-            members_str = "Yes" if item['members'] else "No"
-            volume_str = f"{item['recent_volume']:,}" if item['recent_volume'] > 0 else "N/A"
-            print(f"{i:<4} {item['name'][:16]:<18} {item['buy_price']:<10,} "
-                  f"{item['high_alch_value']:<10,} {item['profit']:<8,} {item['roi_percent']:<5.1f} "
-                  f"{item['limit']:<6} {item['max_profit_per_limit']:<10,} {volume_str:<10} {members_str}")
-    
-    def display_flip_results(self, flips: List[Dict], show_count: int = 20):
-        """Enhanced display with risk indicators"""
-        if not flips:
-            print("No profitable flipping opportunities found with the given criteria.")
-            return
-            
-        print(f"\nTop {min(show_count, len(flips))} Flipping Opportunities:")
-        print("-" * 150)
-        print(f"{'Rank':<4} {'Item Name':<25} {'Buy Price':<12} {'Sell Price':<12} {'Margin':<9} {'Margin%':<7} {'Volume':<8} {'Score':<5} {'Risk':<12} {'Members'}")
-        print("-" * 150)
-        
-        for i, flip in enumerate(flips[:show_count], 1):
-            members_str = "Yes" if flip['members'] else "No"
-            
-            # Risk indicator
-            risk_level = flip.get('risk_level', 0)
-            if risk_level >= 3:
-                risk_indicator = "🚨 HIGH"
-            elif risk_level >= 2:
-                risk_indicator = "⚠️ MEDIUM"
-            elif risk_level >= 1:
-                risk_indicator = "⚡ LOW"
-            else:
-                risk_indicator = "✅ Clean"
-            
-            print(f"{i:<4} {flip['name'][:23]:<25} {flip['buy_price']:<12,} "
-                  f"{flip['sell_price']:<12,} {flip['margin']:<9,} {flip['margin_percent']:<7.1f} "
-                  f"{flip['volume']:<8,} {flip['score']:<5.0f} {risk_indicator:<12} {members_str}")
-        
-        # Show detailed risk information for top items
-        print(f"\nDetailed Risk Analysis for Top {min(5, len(flips))} Items:")
-        print("-" * 80)
-        for i, flip in enumerate(flips[:min(5, len(flips))], 1):
-            risk_info = flip.get('risk_info', 'No analysis')
-            print(f"{i}. {flip['name']}: {risk_info}")
-    
-    def save_to_csv(self, items: List[Dict], filename: str = "osrs_analysis.csv"):
-        """Save results to CSV file"""
-        if not items:
-            print("No data to save.")
-            return
-            
-        try:
-            df = pd.DataFrame(items)
-            df.to_csv(filename, index=False)
-            print(f"Results saved to {filename}")
-        except Exception as e:
-            print(f"Error saving to CSV: {e}")
-            print("Data structure might be incompatible with CSV format.")
-    
     def get_non_alchemizable_sample(self, sample_size: int = 10) -> List[Dict]:
         """
         Get a sample of items that are not alchemizable for debugging purposes
@@ -492,485 +424,7 @@ class OSRSAlchemyFlippingCalculator:
         return alchemy.get_non_alchemizable_sample(
             self.item_mapping, self.non_alchemizable_keywords, sample_size
         )
-    
-    def run_alchemy_analysis(self, min_profit: int = 0, max_items: int = 100, 
-                        members_only: bool = None, save_csv: bool = False,
-                        max_buy_price: int = None, min_limit: int = None, 
-                        min_volume: int = None, max_roi: float = None,
-                        show_non_alchemizable_sample: bool = False,
-                        show_crash_alerts: bool = False, 
-                        alert_min_profit: int = 100, 
-                        alert_min_imbalance: float = 2.0):
-        """
-        Run complete alchemy profit analysis with optional crash detection
-        
-        Args:
-            min_profit: Minimum profit per cast
-            max_items: Maximum number of items to analyze
-            members_only: Filter by members items (True/False/None for all)
-            save_csv: Whether to save results to CSV
-            max_buy_price: Maximum buy price for items (None for no limit)
-            min_limit: Minimum buying limit (None for no limit)
-            min_volume: Minimum hourly trading volume (None for no limit)
-            max_roi: Maximum ROI percentage (None for no limit)
-            show_non_alchemizable_sample: Show sample of filtered non-alchemizable items
-            show_crash_alerts: Whether to show crash risk alerts (NEW)
-            alert_min_profit: Minimum profit for crash alerts (NEW)
-            alert_min_imbalance: Minimum volume imbalance ratio for alerts (NEW)
-        """
-        analysis_title = "OSRS High Alchemy Profit Analysis with Alchemizable Filter"
-        if show_crash_alerts:
-            analysis_title += " + Crash Detection"
-        
-        print(f"Starting {analysis_title}...")
-        print("=" * 70)
-        
-        # Fetch data
-        if not self.fetch_item_mapping():
-            print("Failed to fetch item mapping. Exiting.")
-            return
-            
-        if not self.fetch_current_prices():
-            print("Failed to fetch current prices. Exiting.")
-            return
-            
-        if not self.fetch_volume_data():
-            print("Failed to fetch volume data. Continuing without volume filtering.")
-        
-        # Fetch 5-minute data for crash alerts if requested
-        if show_crash_alerts:
-            print("Fetching 5-minute data for crash risk analysis...")
-            if not self.fetch_five_minute_data():
-                print("Warning: Failed to fetch 5-minute data, crash alerts will be limited")
-        
-        # Show sample of non-alchemizable items if requested
-        if show_non_alchemizable_sample:
-            print("\nSample of items filtered out as non-alchemizable:")
-            print("-" * 80)
-            non_alch_sample = self.get_non_alchemizable_sample()
-            for item in non_alch_sample:
-                reason = "No alch value" if item['highalch'] <= 0 else "No trade limit" if item['limit'] <= 0 else "Name/examine filter"
-                print(f"{item['name'][:25]:<25} | Alch: {item['highalch']:<6} | Limit: {item['limit']:<4} | Reason: {reason}")
-            print("-" * 80)
-        
-        # Display filter information
-        print(f"\nFilters applied:")
-        print(f"Minimum profit: {min_profit:,} gp")
-        if max_buy_price is not None:
-            print(f"Maximum buy price: {max_buy_price:,} gp")
-        if min_limit is not None:
-            print(f"Minimum buying limit: {min_limit}")
-        if min_volume is not None:
-            print(f"Minimum hourly volume: {min_volume:,}")
-        if max_roi is not None:
-            print(f"Maximum ROI: {max_roi}%")
-        if members_only is not None:
-            print(f"Membership: {'Members only' if members_only else 'F2P only'}")
-        if show_crash_alerts:
-            print(f"Crash alerts: Enabled (min profit: {alert_min_profit:,}gp, min imbalance: {alert_min_imbalance}x)")
-        
-        profitable_items = self.get_profitable_items(
-            min_profit=min_profit,
-            max_items=max_items,
-            members_only=members_only,
-            max_buy_price=max_buy_price,
-            min_limit=min_limit,
-            min_volume=min_volume,
-            max_roi=max_roi
-        )
-        
-        # Display results
-        self.display_alchemy_results(profitable_items)
-        
-        # Show crash alerts if enabled
-        if show_crash_alerts and profitable_items:
-            print("\n" + "=" * 70)
-            print("ALCHEMY CRASH RISK ALERTS")
-            print("=" * 70)
-            
-            # Get crash alerts
-            crash_alerts = self.get_alchemy_alerts(
-                min_profit=alert_min_profit,
-                min_volume_imbalance=alert_min_imbalance
-            )
-            
-            # Get item IDs from our profitable items for comparison
-            profitable_item_ids = {item['item_id'] for item in profitable_items}
-            
-            # Separate alerts into those affecting our results vs others
-            relevant_alerts = [alert for alert in crash_alerts 
-                            if alert['item_id'] in profitable_item_ids]
-            other_alerts = [alert for alert in crash_alerts 
-                        if alert['item_id'] not in profitable_item_ids]
-            
-            if relevant_alerts:
-                print(f"\n🚨 CRASH RISK FOR YOUR ITEMS ({len(relevant_alerts)} items):")
-                print("-" * 70)
-                print(f"{'Item':<25} | {'Profit':<8} | {'Status':<12} | {'Vol Ratio':<10} | {'Alert %':<8} | {'Rec'}")
-                print("-" * 70)
-                
-                for alert in relevant_alerts:
-                    status_emoji = '🔴' if alert['status'] == 'crashing' else '🟡'
-                    rec_emoji = '🔥' if alert['recommendation'] == 'buy low' else '⚠️'
-                    
-                    print(f"{status_emoji} {alert['name'][:23]:<23} | "
-                        f"{alert['profit']:>7,.0f} | "
-                        f"{alert['status']:<12} | "
-                        f"{alert['volume_ratio']:>8.1f}x | "
-                        f"{alert['alert_percent']:>6.1f}% | "
-                        f"{rec_emoji} {alert['recommendation'].upper()}")
-            else:
-                print("\n✅ No crash risks detected for your profitable alchemy items")
-                print("All your items show healthy volume balance")
-            
-            # Show other market crash risks
-            if other_alerts:
-                print(f"\n📊 OTHER ALCHEMY CRASH RISKS ({len(other_alerts[:5])} of {len(other_alerts)}):")
-                print("-" * 70)
-                
-                for alert in other_alerts[:5]:  # Show top 5 other risks
-                    status_emoji = '🔴' if alert['status'] == 'crashing' else '🟡'
-                    print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                        f"Profit: {alert['profit']:>6,.0f} | "
-                        f"Vol Ratio: {alert['volume_ratio']:>5.1f}x | "
-                        f"Status: {alert['status']}")
-        
-        # Save to CSV if requested
-        if save_csv:
-            self.save_to_csv(profitable_items, "alchemy_profits.csv")
-        
-        # Enhanced summary statistics
-        if profitable_items:
-            total_profitable = len(profitable_items)
-            avg_profit = sum(item['profit'] for item in profitable_items) / total_profitable
-            max_profit = profitable_items[0]['profit'] if profitable_items else 0
-            avg_volume = sum(item['recent_volume'] for item in profitable_items) / total_profitable
-            avg_roi = sum(item['roi_percent'] for item in profitable_items) / total_profitable
-            
-            print(f"\n" + "=" * 70)
-            print("SUMMARY")
-            print("=" * 70)
-            print(f"Total profitable alchemizable items found: {total_profitable}")
-            print(f"Average profit per cast: {avg_profit:,.1f} gp")
-            print(f"Maximum profit per cast: {max_profit:,} gp")
-            print(f"Average ROI: {avg_roi:.1f}%")
-            print(f"Average hourly volume: {avg_volume:,.0f}")
-            print(f"Nature rune cost used: {self.nature_rune_cost} gp")
-            
-            # Crash alert summary if enabled
-            if show_crash_alerts:
-                crash_alerts = self.get_alchemy_alerts(alert_min_profit, alert_min_imbalance)
-                profitable_item_ids = {item['item_id'] for item in profitable_items}
-                relevant_alerts = [alert for alert in crash_alerts 
-                                if alert['item_id'] in profitable_item_ids]
-                
-                alert_counts = {}
-                for alert in relevant_alerts:
-                    status = alert['status']
-                    alert_counts[status] = alert_counts.get(status, 0) + 1
-                
-                print(f"\nCrash Alert Summary for Your Items:")
-                if alert_counts:
-                    for status, count in alert_counts.items():
-                        emoji = '🔴' if status == 'crashing' else '🟡'
-                        print(f"  {emoji} {status.replace('_', ' ').title()}: {count}")
-                else:
-                    print(f"  ✅ All items stable (no crash risks detected)")
 
-    def run_flipping_analysis(self, limit: int = 10, min_margin: int = 200, 
-                        min_volume: int = 20, max_buy_price: int = None,
-                        members_only: bool = None, save_csv: bool = False, 
-                        fetch_history: bool = True, max_margin_percent: float = 20.0,
-                        exclude_high_risk: bool = True, min_score: int = 30,
-                        use_averaged_prices: bool = True, show_alerts: bool = True,
-                        alert_min_margin: int = 1000, alert_min_volume: int = 20):
-        """
-        Enhanced flipping analysis with optional price averaging and integrated alerts
-        
-        Args:
-            show_alerts: Whether to show crash/trend alerts for flipping items
-            alert_min_margin: Minimum margin for flipping alerts
-            alert_min_volume: Minimum volume for flipping alerts
-        """
-        print("Starting Enhanced OSRS Flipping Analysis with Price Averaging and Alerts...")
-        print("=" * 70)
-        
-        # Fetch basic data
-        if not self.item_mapping:
-            if not self.fetch_item_mapping():
-                print("Failed to fetch item mapping. Exiting.")
-                return
-        
-        if not self.current_prices:
-            if not self.fetch_current_prices():
-                print("Failed to fetch current prices. Exiting.")
-                return
-                
-        if not self.volume_data:
-            if not self.fetch_volume_data():
-                print("Failed to fetch volume data. Exiting.")
-                return
-        
-        # Fetch averaged prices for flipping if requested
-        if use_averaged_prices:
-            self.use_flipping_averages = True
-            print("Fetching averaged prices for more stable flipping analysis...")
-            if not self.fetch_flipping_average_prices():
-                print("Warning: Failed to fetch averaged prices, falling back to realtime prices")
-                self.use_flipping_averages = False
-        else:
-            self.use_flipping_averages = False
-        
-        # Fetch 5-minute data for alerts if requested
-        if show_alerts:
-            print("Fetching 5-minute data for trend and crash analysis...")
-            if not self.fetch_five_minute_data():
-                print("Warning: Failed to fetch 5-minute data, alerts will be limited")
-        
-        print(f"\nPrice source: {'Averaged (more stable)' if self.use_flipping_averages else 'Realtime'}")
-        print(f"Alert system: {'Enabled' if show_alerts else 'Disabled'}")
-        print(f"\nEnhanced Filters applied:")
-        print(f"Minimum margin: {min_margin:,} gp")
-        print(f"Minimum volume: {min_volume:,}")
-        print(f"Maximum margin percentage: {max_margin_percent}%")
-        print(f"Minimum score: {min_score}/100")
-        print(f"Exclude high risk: {'Yes' if exclude_high_risk else 'No'}")
-        if max_buy_price is not None:
-            print(f"Maximum buy price: {max_buy_price:,} gp")
-        if members_only is not None:
-            print(f"Membership: {'Members only' if members_only else 'F2P only'}")
-        
-        # Get flips with enhanced filtering
-        flips = self.get_top_flips(
-            limit=limit * 2,  # Get more items to account for filtering
-            min_margin=min_margin,
-            min_volume=min_volume,
-            max_buy_price=max_buy_price,
-            fetch_history=fetch_history,
-            max_margin_percent=max_margin_percent,
-            exclude_high_risk=exclude_high_risk,
-            min_score=min_score
-        )
-        
-        # Apply members filter if specified
-        if members_only is not None:
-            flips = [flip for flip in flips if flip['members'] == members_only]
-        
-        # Trim to requested limit after filtering
-        flips = flips[:limit]
-        
-        # Display results
-        self.display_flip_results(flips)
-        
-        # Show alerts if enabled
-        if show_alerts and flips:
-            print("\n" + "=" * 70)
-            print("MARKET TREND & CRASH ALERTS")
-            print("=" * 70)
-            
-            # Get flipping alerts for the items we're showing
-            flipping_alerts = self.get_flipping_alerts(
-                min_margin=alert_min_margin,
-                min_volume=alert_min_volume
-            )
-            
-            # Filter alerts to only include items from our flip results
-            flip_item_ids = {flip['id'] for flip in flips}
-            relevant_alerts = [alert for alert in flipping_alerts 
-                            if alert['item_id'] in flip_item_ids]
-            
-            if relevant_alerts:
-                print(f"\n🚨 ACTIVE ALERTS ({len(relevant_alerts)} items):")
-                print("-" * 70)
-                
-                for alert in relevant_alerts:
-                    status_emoji = {
-                        'crashing': '🔴',
-                        'crash_risk': '🟡',
-                        'surging': '🟢',
-                        'surge_risk': '🟠'
-                    }.get(alert['status'], '⚪')
-                    
-                    recommendation_emoji = {
-                        'avoid': '❌',
-                        'caution': '⚠️',
-                        'opportunity': '💰',
-                        'safe': '✅'
-                    }.get(alert['recommendation'], '❓')
-                    
-                    print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                        f"Status: {alert['status']:<12} | "
-                        f"Price Δ: {alert['price_change_percent']:>6.1f}% | "
-                        f"Vol: {alert['high_volume']:>4}/{alert['low_volume']:<4} | "
-                        f"{recommendation_emoji} {alert['recommendation'].upper()}")
-            else:
-                print("\n✅ No significant alerts for your current flipping opportunities")
-                print("All items appear stable based on recent 5-minute data")
-            
-            # Show broader market alerts (items not in current flip list)
-            other_alerts = [alert for alert in flipping_alerts 
-                        if alert['item_id'] not in flip_item_ids]
-            
-            if other_alerts:
-                print(f"\n📊 OTHER MARKET MOVEMENTS ({len(other_alerts[:10])} of {len(other_alerts)}):")
-                print("-" * 70)
-                
-                for alert in other_alerts[:10]:  # Show top 10 other alerts
-                    status_emoji = {
-                        'crashing': '🔴',
-                        'crash_risk': '🟡',
-                        'surging': '🟢',
-                        'surge_risk': '🟠'
-                    }.get(alert['status'], '⚪')
-                    
-                    print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                        f"Status: {alert['status']:<12} | "
-                        f"Price Δ: {alert['price_change_percent']:>6.1f}% | "
-                        f"Margin: {alert['margin']:>8,.0f}gp")
-        
-        # Save to CSV if requested
-        if save_csv:
-            self.save_to_csv(flips, "enhanced_flipping_opportunities.csv")
-        
-        # Enhanced summary statistics
-        if flips:
-            total_flips = len(flips)
-            avg_margin = sum(flip['margin'] for flip in flips) / total_flips
-            avg_margin_percent = sum(flip['margin_percent'] for flip in flips) / total_flips
-            avg_volume = sum(flip['volume'] for flip in flips) / total_flips
-            avg_score = sum(flip['score'] for flip in flips) / total_flips
-            
-            # Risk distribution
-            high_risk = len([f for f in flips if f.get('risk_level', 0) >= 3])
-            medium_risk = len([f for f in flips if f.get('risk_level', 0) == 2])
-            low_risk = len([f for f in flips if f.get('risk_level', 0) == 1])
-            clean = len([f for f in flips if f.get('risk_level', 0) == 0])
-            
-            print(f"\n" + "=" * 70)
-            print("ENHANCED SUMMARY")
-            print("=" * 70)
-            print(f"Total flipping opportunities found: {total_flips}")
-            print(f"Average margin: {avg_margin:,.0f} gp ({avg_margin_percent:.1f}%)")
-            print(f"Average volume: {avg_volume:,.0f}")
-            print(f"Average flip score: {avg_score:.1f}/100")
-            print(f"\nRisk Distribution:")
-            print(f"  🚨 High Risk: {high_risk}")
-            print(f"  ⚠️ Medium Risk: {medium_risk}")
-            print(f"  ⚡ Low Risk: {low_risk}")
-            print(f"  ✅ Clean: {clean}")
-            
-            # Alert summary if enabled
-            if show_alerts:
-                flipping_alerts = self.get_flipping_alerts(alert_min_margin, alert_min_volume)
-                flip_item_ids = {flip['id'] for flip in flips}
-                relevant_alerts = [alert for alert in flipping_alerts 
-                                if alert['item_id'] in flip_item_ids]
-                
-                alert_counts = {}
-                for alert in relevant_alerts:
-                    status = alert['status']
-                    alert_counts[status] = alert_counts.get(status, 0) + 1
-                
-                print(f"\nAlert Summary for Your Items:")
-                if alert_counts:
-                    for status, count in alert_counts.items():
-                        emoji = {'crashing': '🔴', 'crash_risk': '🟡', 
-                                'surging': '🟢', 'surge_risk': '🟠'}.get(status, '⚪')
-                        print(f"  {emoji} {status.replace('_', ' ').title()}: {count}")
-                else:
-                    print(f"  ✅ All items stable (no alerts)")
-
-    def run_combined_analysis(self, alchemy_filters: Dict = None, flipping_filters: Dict = None,
-                            save_csv: bool = False):
-        """
-        Run both alchemy and flipping analysis with shared data fetching
-        
-        Args:
-            alchemy_filters: Dictionary of filters for alchemy analysis
-            flipping_filters: Dictionary of filters for flipping analysis
-            save_csv: Whether to save results to CSV files
-        """
-        print("Starting Combined OSRS Analysis (Alchemy + Enhanced Flipping)...")
-        print("=" * 70)
-        
-        # Set default filters if not provided
-        if alchemy_filters is None:
-            alchemy_filters = {
-                'min_profit': 0,
-                'max_items': 50,
-                'members_only': None,
-                'max_buy_price': None,
-                'min_limit': None,
-                'min_volume': None,
-                'max_roi': None
-            }
-        
-        if flipping_filters is None:
-            flipping_filters = {
-                'limit': 10,
-                'min_margin': 200,
-                'min_volume': 20,
-                'members_only': None,
-                'fetch_history': True,
-                'max_margin_percent': 20.0,
-                'exclude_high_risk': True,
-                'min_score': 30
-            }
-        
-        # Fetch shared data once
-        if not self.fetch_item_mapping():
-            print("Failed to fetch item mapping. Exiting.")
-            return
-        
-        # Run alchemy analysis
-        print("\n" + "="*50)
-        print("HIGH ALCHEMY ANALYSIS")
-        print("="*50)
-        
-        if not self.fetch_current_prices():
-            print("Failed to fetch current prices for alchemy analysis.")
-        else:
-            if not self.fetch_volume_data():
-                print("Warning: Failed to fetch volume data for alchemy analysis.")
-            
-            profitable_items = self.get_profitable_items(**alchemy_filters)
-            self.display_alchemy_results(profitable_items)
-            
-            if save_csv:
-                self.save_to_csv(profitable_items, "alchemy_profits.csv")
-        
-        # Run enhanced flipping analysis
-        print("\n" + "="*50)
-        print("ENHANCED FLIPPING ANALYSIS")
-        print("="*50)
-        
-        # Reuse current prices and volume data if already fetched for alchemy
-        if not self.current_prices:
-            if not self.fetch_current_prices():
-                print("Failed to fetch current prices for flipping analysis.")
-                return
-        
-        if not self.volume_data:
-            if not self.fetch_volume_data():
-                print("Failed to fetch volume data for flipping analysis.")
-                return
-        
-        # Extract members_only from flipping_filters before passing to get_top_flips
-        members_filter = flipping_filters.pop('members_only', None)
-        flips = self.get_top_flips(**flipping_filters)
-        
-        # Apply members filter if specified
-        if members_filter is not None:
-            flips = [flip for flip in flips if flip['members'] == members_filter]
-        
-        self.display_flip_results(flips)
-        
-        if save_csv:
-            self.save_to_csv(flips, "enhanced_flipping_opportunities.csv")
-        
-        print("\n" + "="*70)
-        print("ENHANCED ANALYSIS COMPLETE")
-        print("="*70)
 
     def fetch_flipping_average_prices(self, item_ids: List[int] = None, timestep: str = "24h") -> bool:
         """
@@ -1283,16 +737,17 @@ class OSRSAlchemyFlippingCalculator:
         
         return alerts
 
-# Example usage with enhanced filtering
 if __name__ == "__main__":
+    from cli import main as cli
+
     calculator = OSRSAlchemyFlippingCalculator()
-   
-    # Example 1: Enhanced flipping analysis with trend alerts
+
     print("=" * 70)
     print("ENHANCED FLIPPING ANALYSIS WITH TREND ALERTS")
     print("=" * 70)
-   
-    calculator.run_flipping_analysis(
+
+    cli.run_flipping_analysis(
+        calculator,
         limit=15,
         min_margin=1000,
         min_volume=50,
@@ -1301,32 +756,32 @@ if __name__ == "__main__":
         max_margin_percent=15.0,
         exclude_high_risk=True,
         min_score=40,
-        save_csv=True,
+        save_csv_file=True,
         fetch_history=True,
         use_averaged_prices=True,
-        show_alerts=True,           # NEW: Enable trend alerts
-        alert_min_margin=1000,      # NEW: Alert threshold
-        alert_min_volume=20         # NEW: Alert volume threshold
+        show_alerts=True,
+        alert_min_margin=1000,
+        alert_min_volume=20
     )
-   
+
     time.sleep(2)
-   
-    # Example 2: Enhanced alchemy analysis with crash detection
+
     print("\n" + "=" * 70)
     print("ENHANCED ALCHEMY ANALYSIS WITH CRASH DETECTION")
     print("=" * 70)
-   
-    calculator.run_alchemy_analysis(
-        min_profit=200,             # Your existing parameters
+
+    cli.run_alchemy_analysis(
+        calculator,
+        min_profit=200,
         max_items=100,
         members_only=None,
-        save_csv=True,
+        save_csv_file=True,
         max_buy_price=10000000,
         min_limit=None,
         min_volume=20,
         max_roi=None,
         show_non_alchemizable_sample=False,
-        show_crash_alerts=True,     # NEW: Enable crash alerts
-        alert_min_profit=100,       # NEW: Alert threshold
-        alert_min_imbalance=2.0     # NEW: Volume imbalance threshold
+        show_crash_alerts=True,
+        alert_min_profit=100,
+        alert_min_imbalance=2.0
     )
