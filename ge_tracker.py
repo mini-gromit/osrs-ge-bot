@@ -6,6 +6,7 @@ import pandas as pd
 import math
 
 from api.client import OSRSAPIClient
+from domain import alchemy, flipping, risk
 
 class OSRSAlchemyFlippingCalculator:
     def __init__(self):
@@ -36,43 +37,14 @@ class OSRSAlchemyFlippingCalculator:
     def is_alchemizable(self, item_data: Dict) -> bool:
         """
         Check if an item can be alchemized based on various criteria
-        
+
         Args:
             item_data: Dictionary containing item information from mapping
-            
+
         Returns:
             True if item can be alchemized, False otherwise
         """
-        # Must have a high alchemy value greater than 0
-        if item_data.get('highalch', 0) <= 0:
-            return False
-            
-        # Must have a trade limit (items with limit 0 are often untradeable)
-        if item_data.get('limit', 0) <= 0:
-            return False
-            
-        # Check item name for non-alchemizable keywords
-        item_name = item_data.get('name', '').lower()
-        for keyword in self.non_alchemizable_keywords:
-            if keyword in item_name:
-                return False
-        
-        # Additional checks based on examine text (if available)
-        examine = item_data.get('examine', '').lower()
-        if any(phrase in examine for phrase in ['untradeable', 'cannot be traded', 'quest item']):
-            return False
-            
-        # Items with extremely high alch values relative to their value might be suspicious
-        # (could indicate items that aren't actually alchemizable but have incorrect data)
-        item_value = item_data.get('value', 0)
-        alch_value = item_data.get('highalch', 0)
-        
-        # If alch value is more than 10x the base value, it might be suspicious
-        # This helps filter out some incorrect data
-        if item_value > 0 and alch_value > (item_value * 10):
-            return False
-            
-        return True
+        return alchemy.is_alchemizable(item_data, self.non_alchemizable_keywords)
         
     def fetch_item_mapping(self) -> bool:
         """
@@ -187,443 +159,49 @@ class OSRSAlchemyFlippingCalculator:
     def detect_pump_and_dump(self, history_prices: List[Dict], current_high: int, current_low: int) -> tuple:
         """
         Enhanced pump and dump detection with multiple criteria
-        
+
         Args:
             history_prices: List of historical price data
             current_high: Current high price
             current_low: Current low price
-            
+
         Returns:
             Tuple of (is_suspicious, risk_level, reason)
         """
-        if not history_prices or len(history_prices) < 10:
-            return False, 0, "Insufficient data"
-        
-        try:
-            # Get recent data points (last 20 entries)
-            recent_data = history_prices[-20:]
-            
-            # Extract high and low prices
-            highs = [entry.get('avgHighPrice', 0) for entry in recent_data if entry.get('avgHighPrice')]
-            lows = [entry.get('avgLowPrice', 0) for entry in recent_data if entry.get('avgLowPrice')]
-            volumes = [entry.get('highPriceVolume', 0) + entry.get('lowPriceVolume', 0) 
-                      for entry in recent_data 
-                      if entry.get('highPriceVolume') is not None and entry.get('lowPriceVolume') is not None]
-            
-            if len(highs) < 10 or len(lows) < 10:
-                return False, 0, "Insufficient price data"
-            
-            # Calculate statistics
-            avg_high = statistics.mean(highs)
-            avg_low = statistics.mean(lows)
-            median_high = statistics.median(highs)
-            median_low = statistics.median(lows)
-            
-            # Standard deviations
-            high_std = statistics.stdev(highs) if len(highs) > 1 else 0
-            low_std = statistics.stdev(lows) if len(lows) > 1 else 0
-            
-            risk_factors = []
-            risk_score = 0
-            
-            # 1. Extreme price spikes (current price vs historical average)
-            high_spike_ratio = current_high / avg_high if avg_high > 0 else 1
-            low_spike_ratio = current_low / avg_low if avg_low > 0 else 1
-            
-            if high_spike_ratio > 1.5:  # Current high is 2x+ historical average
-                risk_score += 30
-                risk_factors.append(f"High spike: {high_spike_ratio:.1f}x avg")
-            elif high_spike_ratio > 1.3:
-                risk_score += 15
-                risk_factors.append(f"Moderate high spike: {high_spike_ratio:.1f}x avg")
-            
-            if low_spike_ratio > 1.2:  # Current low is 1.8x+ historical average
-                risk_score += 25
-                risk_factors.append(f"Low spike: {low_spike_ratio:.1f}x avg")
-            
-            # 2. Excessive volatility
-            if avg_high > 0:
-                high_volatility = (high_std / avg_high) * 100
-                if high_volatility > 20:  # More than 30% volatility
-                    risk_score += 20
-                    risk_factors.append(f"High volatility: {high_volatility:.1f}%")
-                elif high_volatility > 15:
-                    risk_score += 10
-                    risk_factors.append(f"Moderate volatility: {high_volatility:.1f}%")
-            
-            # 3. Large deviation from median (indicates outliers)
-            high_median_deviation = abs(current_high - median_high) / median_high if median_high > 0 else 0
-            if high_median_deviation > 0.5:  # Current price deviates >50% from median
-                risk_score += 15
-                risk_factors.append(f"Median deviation: {high_median_deviation:.1%}")
-            
-            # 4. Sudden volume changes (if volume data available)
-            if volumes and len(volumes) >= 5:
-                recent_volume = statistics.mean(volumes[-3:])  # Last 3 periods
-                older_volume = statistics.mean(volumes[:-3])   # Older periods
-                
-                if older_volume > 0:
-                    volume_change = recent_volume / older_volume
-                    if volume_change > 3.0:  # 3x+ volume increase
-                        risk_score += 20
-                        risk_factors.append(f"Volume spike: {volume_change:.1f}x")
-                    elif volume_change < 0.3:  # Volume dropped to <30%
-                        risk_score += 15
-                        risk_factors.append(f"Volume drop: {volume_change:.1%}")
-            
-            # 5. Recent rapid price changes
-            if len(highs) >= 5:
-                recent_highs = highs[-3:]
-                if len(set(recent_highs)) > 1:  # Prices are changing
-                    max_recent = max(recent_highs)
-                    min_recent = min(recent_highs)
-                    if min_recent > 0:
-                        recent_volatility = (max_recent - min_recent) / min_recent
-                        if recent_volatility > 0.3:  # 30%+ swing in recent periods
-                            risk_score += 15
-                            risk_factors.append(f"Recent swing: {recent_volatility:.1%}")
-            
-            # 6. Unrealistic margins
-            current_margin_percent = ((current_high - current_low) / current_low * 100) if current_low > 0 else 0
-            if current_margin_percent > 25:  # >25% margin is suspicious for most items
-                risk_score += 25
-                risk_factors.append(f"High margin: {current_margin_percent:.1f}%")
-            elif current_margin_percent > 15:
-                risk_score += 10
-                risk_factors.append(f"Elevated margin: {current_margin_percent:.1f}%")
-            
-            # Determine risk level and suspicion
-            if risk_score >= 30:
-                return True, 3, "HIGH: " + "; ".join(risk_factors[:3])
-            elif risk_score >= 20:
-                return True, 2, "MEDIUM: " + "; ".join(risk_factors[:2])
-            elif risk_score >= 10:
-                return True, 1, "LOW: " + "; ".join(risk_factors[:2])
-            else:
-                return False, 0, "Clean"
-                
-        except Exception as e:
-            return False, 0, f"Analysis error: {str(e)}"
+        return risk.detect_pump_and_dump(history_prices, current_high, current_low)
     
     def calculate_alchemy_profit(self, item_id: int) -> Optional[Dict]:
         """
         Calculate high alchemy profit for a specific item
-        MODIFIED: Now uses 5-minute low_volume instead of hourly volume
-        Returns dict with profit calculation or None if data unavailable or not alchemizable
-        """
-        if item_id not in self.item_mapping:
-            return None
-            
-        if str(item_id) not in self.current_prices:
-            return None
-            
-        item_info = self.item_mapping[item_id]
-        
-        # Check if item is alchemizable
-        if not self.is_alchemizable(item_info):
-            return None
-            
-        price_info = self.current_prices[str(item_id)]
-        
-        # Use the low price (instant-sell price) for buying
-        if price_info['low'] is None:
-            return None
-            
-        buy_price = price_info['low']
-        high_alch_value = item_info['highalch']
-        
-        # Calculate profit: High alch value - buy price - nature rune cost
-        profit = high_alch_value - buy_price - self.nature_rune_cost
-        
-        # Calculate ROI percentage
-        total_cost = buy_price + self.nature_rune_cost
-        roi_percent = (profit / total_cost) * 100 if total_cost > 0 else 0
-        
-        # Get 5-minute volume data (low volume) instead of hourly volume
-        volume = 0
-        if item_id in self.five_min_data:
-            volume = self.five_min_data[item_id].get('low_volume', 0)
-        
-        return {
-            'item_id': item_id,
-            'name': item_info['name'],
-            'buy_price': buy_price,
-            'high_alch_value': high_alch_value,
-            'nature_rune_cost': self.nature_rune_cost,
-            'profit': profit,
-            'roi_percent': roi_percent,
-            'limit': item_info['limit'],
-            'members': item_info['members'],
-            'max_profit_per_limit': profit * item_info['limit'] if profit > 0 else 0,
-            'recent_volume': volume,  # uses 5-minute data
-            'alchemizable': True  # Only returned if alchemizable
-        }
 
-    def calculate_flip_score(self, current_high_price: int, current_low_price: int, 
+        Returns:
+            Dict with profit calculation or None if data unavailable or not alchemizable
+        """
+        return alchemy.calculate_alchemy_profit(
+            item_id, self.item_mapping, self.current_prices,
+            self.five_min_data, self.nature_rune_cost, self.non_alchemizable_keywords
+        )
+
+    def calculate_flip_score(self, current_high_price: int, current_low_price: int,
                             volume: int, margin: int, limit: int, history_prices: List[Dict], base_score=0) -> tuple:
         """
-        Balanced granular flip score calculation - maintains score ranges while adding precision
-        FIXED: Better balanced scoring that doesn't penalize good items too heavily
-        """
-        score = base_score  # Start with basic score instead of 0
-        factors = [f"Base: {base_score}"]
-        
-        # FIXED: Recalculate actual margin with GE tax for scoring consistency
-        buy_price_with_tax = int(current_low_price * 1.01)
-        sell_price_after_tax = int(current_high_price * 0.99)
-        actual_margin = sell_price_after_tax - buy_price_with_tax
-        actual_margin_percent = (actual_margin / buy_price_with_tax * 100) if buy_price_with_tax > 0 else 0
-        
-        # Use the actual margin for scoring instead of the passed margin
-        scoring_margin = actual_margin
-        scoring_margin_percent = actual_margin_percent
-        
-        # First, check for pump and dump using original prices
-        is_suspicious, risk_level, risk_reason = self.detect_pump_and_dump(
-            history_prices, current_high_price, current_low_price
-        )
-        
-        # Heavily penalize suspicious items
-        if is_suspicious:
-            if risk_level >= 3:  # HIGH risk
-                score -= 50
-                factors.append(f"🚨 HIGH RISK: {risk_reason}")
-            elif risk_level >= 2:  # MEDIUM risk
-                score -= 25
-                factors.append(f"⚠️ MEDIUM RISK: {risk_reason}")
-            else:  # LOW risk
-                score -= 10
-                factors.append(f"⚡ LOW RISK: {risk_reason}")
-        
-        # 1. BALANCED Margin Score (0-20 points) - More generous scoring
-        if scoring_margin >= 50000:  # 50K+
-            margin_score = min(20, 18 + (scoring_margin - 50000) / 50000)  # 18-20 range
-        elif scoring_margin >= 25000:   # 25K-50K
-            margin_score = 16 + (scoring_margin - 25000) / 12500           # 16-18 range
-        elif scoring_margin >= 15000:   # 15K-25K
-            margin_score = 14 + (scoring_margin - 15000) / 5000            # 14-16 range
-        elif scoring_margin >= 10000:   # 10K-15K
-            margin_score = 12 + (scoring_margin - 10000) / 2500            # 12-14 range
-        elif scoring_margin >= 5000:    # 5K-10K
-            margin_score = 9 + (scoring_margin - 5000) / 1667              # 9-12 range
-        elif scoring_margin >= 2500:    # 2.5K-5K
-            margin_score = 6 + (scoring_margin - 2500) / 833               # 6-9 range
-        elif scoring_margin >= 1000:    # 1K-2.5K
-            margin_score = 3 + (scoring_margin - 1000) / 500               # 3-6 range
-        elif scoring_margin >= 500:     # 500-1K
-            margin_score = 1 + (scoring_margin - 500) / 250                # 1-3 range
-        else:
-            margin_score = max(0, scoring_margin / 500)                    # 0-1 range
-        
-        margin_score = round(margin_score, 1)
-        score += margin_score
-        factors.append(f"Margin: {margin_score}/20")
-        
-        # 2. BALANCED Volume Score (0-20 points) - More generous for your data
-        if volume >= 500:
-            volume_score = min(20, 18 + (volume - 500) / 250)             # 18-20 range
-        elif volume >= 400:
-            volume_score = 16 + (volume - 300) / 150                      # 16-18 range
-        elif volume >= 300:
-            volume_score = 14 + (volume - 60) / 30                       # 14-16 range
-        elif volume >= 200:
-            volume_score = 12 + (volume - 150) / 75                       # 12-14 range
-        elif volume >= 100:
-            volume_score = 9 + (volume - 100) / 50                        # 9-12 range
-        elif volume >= 50:
-            volume_score = 7 + (volume - 50) / 25                       # 7-9 range
-        elif volume >= 30:
-            volume_score = 5 + (volume - 30) / 15                       # 5-7 range
-        elif volume >= 15:
-            volume_score = 3 + (volume - 15) / 7.5                       # 3-5 range
-        elif volume >= 10:
-            volume_score = 1 + (volume - 10) / 7.5                        # 1-3 range
-        else:
-            volume_score = volume / 10                                     # 0-1 range
-        
-        volume_score = round(volume_score, 1)
-        score += volume_score
-        factors.append(f"Volume: {volume_score}/20")
-        
-        # 3. BALANCED ROI Score (0-15 points) - More generous percentage bands
-        # Cap ROI at reasonable levels to avoid pump/dump items
-        capped_margin_percent = min(25, scoring_margin_percent)
-        
-        if capped_margin_percent >= 8:
-            roi_score = 13 + (capped_margin_percent - 8) / 8.5            # 13-15 range
-        elif capped_margin_percent >= 5:
-            roi_score = 11 + (capped_margin_percent - 5) / 1.5            # 11-13 range
-        elif capped_margin_percent >= 3:
-            roi_score = 8 + (capped_margin_percent - 3) / 0.67            # 8-11 range
-        elif capped_margin_percent >= 2:
-            roi_score = 6 + (capped_margin_percent - 2) / 0.5             # 6-8 range
-        elif capped_margin_percent >= 1:
-            roi_score = 4 + (capped_margin_percent - 1) / 0.5             # 4-6 range
-        elif capped_margin_percent >= 0.5:
-            roi_score = 2 + (capped_margin_percent - 0.5) / 0.25          # 2-4 range
-        else:
-            roi_score = capped_margin_percent * 4                         # 0-2 range
-        
-        roi_score = round(roi_score, 1)
-        score += roi_score
-        factors.append(f"ROI: {roi_score}/15 ({scoring_margin_percent:.1f}%)")
-        
-        # 4. Enhanced Stability Score (0-25 points) - More generous base scoring
-        stability_score = 8  # Higher default for items without history
-        trend_info = "No trend data"
-        
-        if history_prices and len(history_prices) >= 8:
-            try:
-                # Get more data points for better analysis
-                recent_data = history_prices[-15:]
-                highs = [entry.get('avgHighPrice', 0) for entry in recent_data if entry.get('avgHighPrice')]
-                lows = [entry.get('avgLowPrice', 0) for entry in recent_data if entry.get('avgLowPrice')]
-                
-                if len(highs) >= 8 and len(lows) >= 8:
-                    # Calculate multiple stability metrics
-                    avg_high = statistics.mean(highs)
-                    avg_low = statistics.mean(lows)
-                    
-                    # Coefficient of variation (more robust than simple variance)
-                    if avg_high > 0 and avg_low > 0:
-                        high_cv = (statistics.stdev(highs) / avg_high) * 100
-                        low_cv = (statistics.stdev(lows) / avg_low) * 100
-                        avg_cv = (high_cv + low_cv) / 2
-                        
-                        # BALANCED stability scoring - more generous
-                        if avg_cv < 2:
-                            stability_score = 25
-                            trend_info = "🟢 Extremely Stable"
-                        elif avg_cv < 4:
-                            stability_score = 22 + (4 - avg_cv) * 1.5              # 22-25 range
-                            trend_info = "🟢 Very Stable"
-                        elif avg_cv < 7:
-                            stability_score = 18 + (7 - avg_cv) * 1.33             # 18-22 range
-                            trend_info = "🟢 Stable"
-                        elif avg_cv < 12:
-                            stability_score = 14 + (12 - avg_cv) * 0.8             # 14-18 range
-                            trend_info = "🟡 Mostly Stable"
-                        elif avg_cv < 20:
-                            stability_score = 10 + (20 - avg_cv) * 0.5             # 10-14 range
-                            trend_info = "🟡 Moderate"
-                        elif avg_cv < 30:
-                            stability_score = 6 + (30 - avg_cv) * 0.4              # 6-10 range
-                            trend_info = "🟠 Volatile"
-                        else:
-                            stability_score = max(3, 6 - (avg_cv - 30) * 0.1)      # 3-6 range
-                            trend_info = "🔴 Very Volatile"
-                    
-                    # More generous bonus/penalty for current prices vs historical averages
-                    if avg_high > 0 and avg_low > 0:
-                        high_deviation = abs(current_high_price - avg_high) / avg_high
-                        low_deviation = abs(current_low_price - avg_low) / avg_low
-                        avg_deviation = (high_deviation + low_deviation) / 2
-                        
-                        if avg_deviation < 0.05:
-                            score += 4
-                            trend_info += " | Perfect avg"
-                        elif avg_deviation < 0.1:
-                            score += 3
-                            trend_info += " | Near avg"
-                        elif avg_deviation < 0.15:
-                            score += 2
-                            trend_info += " | Close to avg"
-                        elif avg_deviation < 0.25:
-                            score += 1
-                            trend_info += " | Reasonable avg"
-                        elif avg_deviation > 0.5:
-                            score -= 2
-                            trend_info += " | Far from avg"
-                        elif avg_deviation > 0.35:
-                            score -= 1
-                            trend_info += " | Off avg"
-                            
-            except Exception:
-                pass
-        
-        stability_score = round(stability_score, 1)
-        score += stability_score
-        factors.append(f"Stability: {stability_score}/25")
-        
-        # 5. BALANCED Limit Score (0-15 points) - More generous scoring
-        if limit <= 0:
-            limit_score = 2  # Better base score for items without limits
-        else:
-            # Calculate potential daily profit using tax-adjusted margin
-            daily_profit_potential = scoring_margin * limit
-            
-            if daily_profit_potential >= 2000000:  # 2M+ daily potential
-                limit_score = 13 + min(2, (daily_profit_potential - 2000000) / 2000000)  # 13-15 range
-            elif daily_profit_potential >= 1000000:  # 1M-2M daily potential
-                limit_score = 11 + (daily_profit_potential - 1000000) / 500000           # 11-13 range
-            elif daily_profit_potential >= 500000:   # 500K-1M daily potential
-                limit_score = 9 + (daily_profit_potential - 500000) / 250000             # 9-11 range
-            elif daily_profit_potential >= 250000:   # 250K-500K daily potential
-                limit_score = 7 + (daily_profit_potential - 250000) / 125000             # 7-9 range
-            elif daily_profit_potential >= 100000:   # 100K-250K daily potential
-                limit_score = 5 + (daily_profit_potential - 100000) / 75000              # 5-7 range
-            elif daily_profit_potential >= 50000:    # 50K-100K daily potential
-                limit_score = 3 + (daily_profit_potential - 50000) / 25000               # 3-5 range
-            else:
-                limit_score = 2 + daily_profit_potential / 25000                         # 2-3 range
-        
-        limit_score = round(limit_score, 1)
-        score += limit_score
-        factors.append(f"Limit: {limit_score}/15")
-        
-        # 6. BALANCED Liquidity Score (0-5 points) - More achievable scoring
-        if volume > 0 and scoring_margin > 0:
-            turnover_ratio = volume / max(1, current_low_price / 1000)
-            
-            if turnover_ratio > 30:
-                liquidity_score = 5
-            elif turnover_ratio > 20:
-                liquidity_score = 4.5 + (turnover_ratio - 20) / 20            # 4.5-5 range
-            elif turnover_ratio > 15:
-                liquidity_score = 4 + (turnover_ratio - 15) / 10              # 4-4.5 range
-            elif turnover_ratio > 10:
-                liquidity_score = 3.5 + (turnover_ratio - 10) / 10            # 3.5-4 range
-            elif turnover_ratio > 5:
-                liquidity_score = 2.5 + (turnover_ratio - 5) / 5              # 2.5-3.5 range
-            elif turnover_ratio > 2:
-                liquidity_score = 1.5 + (turnover_ratio - 2) / 3              # 1.5-2.5 range
-            elif turnover_ratio > 1:
-                liquidity_score = 1 + (turnover_ratio - 1) / 1                # 1-1.5 range
-            else:
-                liquidity_score = 0.5 + turnover_ratio / 2                    # 0.5-1 range
-        else:
-            liquidity_score = 0.5
-        
-        liquidity_score = round(liquidity_score, 1)
-        score += liquidity_score
-        factors.append(f"Liquidity: {liquidity_score}/5")
-        
-        # Final score bounds with decimal precision
-        score = max(0, min(100, round(score, 1)))
-        
-        # Create comprehensive summary
-        risk_indicator = ""
-        if is_suspicious:
-            if risk_level >= 3:
-                risk_indicator = "🚨 HIGH RISK"
-            elif risk_level >= 2:
-                risk_indicator = "⚠️ MEDIUM RISK"
-            else:
-                risk_indicator = "⚡ LOW RISK"
-        else:
-            risk_indicator = "✅ Clean"
-        
-        summary = f"{trend_info} | {risk_indicator} | Score: {score}/100"
-        
-        return score, summary, (is_suspicious, risk_level, risk_reason)
+        Balanced granular flip score calculation.
 
-    def get_profitable_items(self, min_profit: int = 0, max_items: int = 100, 
+        Returns:
+            Tuple of (score, summary, risk_info)
+        """
+        return flipping.calculate_flip_score(
+            current_high_price, current_low_price, volume, margin, limit,
+            history_prices, self.detect_pump_and_dump, base_score
+        )
+
+    def get_profitable_items(self, min_profit: int = 0, max_items: int = 100,
                            members_only: bool = None, max_buy_price: int = None,
                            min_limit: int = None, min_volume: int = None,
                            max_roi: float = None) -> List[Dict]:
         """
         Get list of profitable high alchemy items
-        
+
         Args:
             min_profit: Minimum profit per cast
             max_items: Maximum number of items to return
@@ -632,63 +210,26 @@ class OSRSAlchemyFlippingCalculator:
             min_limit: Minimum buying limit (None for no limit)
             min_volume: Minimum hourly trading volume (None for no limit)
             max_roi: Maximum ROI percentage (None for no limit)
-        
+
         Returns:
             List of profitable items sorted by profit descending
         """
-        profitable_items = []
-        total_items_checked = 0
-        alchemizable_items = 0
-        
-        for item_id in self.item_mapping:
-            total_items_checked += 1
-            
-            # First check if item is alchemizable
-            if not self.is_alchemizable(self.item_mapping[item_id]):
-                continue
-                
-            alchemizable_items += 1
-            profit_data = self.calculate_alchemy_profit(item_id)
-            
-            if profit_data is None:
-                continue
-                
-            # Apply filters
-            if profit_data['profit'] < min_profit:
-                continue
-                
-            if members_only is not None:
-                if profit_data['members'] != members_only:
-                    continue
-                    
-            # Filter for buy price
-            if max_buy_price is not None:
-                if profit_data['buy_price'] > max_buy_price:
-                    continue
-                    
-            # Filter for limit
-            if min_limit is not None:
-                if profit_data['limit'] < min_limit:
-                    continue
-                    
-            # Filter for minimum volume
-            if min_volume is not None:
-                if profit_data['recent_volume'] < min_volume:
-                    continue
-                    
-            # Filter for maximum ROI
-            if max_roi is not None:
-                if profit_data['roi_percent'] > max_roi:
-                    continue
-            
-            profitable_items.append(profit_data)
-        
-        # Sort by profit descending and return top items
-        profitable_items.sort(key=lambda x: x['profit'], reverse=True)
-        
+        total_items_checked = len(self.item_mapping)
+        alchemizable_items = sum(
+            1 for item_id in self.item_mapping
+            if self.is_alchemizable(self.item_mapping[item_id])
+        )
+
+        profitable_items = alchemy.get_profitable_items(
+            self.item_mapping, self.current_prices, self.five_min_data,
+            self.nature_rune_cost, self.non_alchemizable_keywords,
+            min_profit, max_items, members_only, max_buy_price,
+            min_limit, min_volume, max_roi
+        )
+
         print(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
-        
-        return profitable_items[:max_items]
+
+        return profitable_items
     
     def get_top_flips(self, limit: int = 10, min_margin: int = 200, min_volume: int = 20, 
                     max_buy_price: int = None, fetch_history: bool = True, 
@@ -941,24 +482,16 @@ class OSRSAlchemyFlippingCalculator:
     def get_non_alchemizable_sample(self, sample_size: int = 10) -> List[Dict]:
         """
         Get a sample of items that are not alchemizable for debugging purposes
+
+        Args:
+            sample_size: Number of samples to return
+
+        Returns:
+            List of non-alchemizable item samples
         """
-        non_alchemizable = []
-        
-        for item_id, item_info in list(self.item_mapping.items())[:1000]:  # Check first 1000 items
-            if not self.is_alchemizable(item_info):
-                non_alchemizable.append({
-                    'item_id': item_id,
-                    'name': item_info['name'],
-                    'highalch': item_info['highalch'],
-                    'limit': item_info['limit'],
-                    'value': item_info['value'],
-                    'examine': item_info['examine'][:50] + '...' if len(item_info['examine']) > 50 else item_info['examine']
-                })
-                
-                if len(non_alchemizable) >= sample_size:
-                    break
-                    
-        return non_alchemizable
+        return alchemy.get_non_alchemizable_sample(
+            self.item_mapping, self.non_alchemizable_keywords, sample_size
+        )
     
     def run_alchemy_analysis(self, min_profit: int = 0, max_items: int = 100, 
                         members_only: bool = None, save_csv: bool = False,
@@ -1600,197 +1133,28 @@ class OSRSAlchemyFlippingCalculator:
     def analyze_alchemy_crash_risk(self, item_id: int) -> Dict:
         """
         Simplified alchemy crash detection - when low price volume >> high price volume
-        This indicates people are dumping items, which could crash the buy price
-        
+
         Args:
             item_id: Item ID to analyze
-            
+
         Returns:
             Dictionary with simple crash analysis for alchemy items
         """
-        result = {
-            'status': 'stable',  # stable, crash_risk, crashing
-            'high_volume': 0,
-            'low_volume': 0,
-            'hourly_volume': 0,
-            'volume_ratio': 0,  # low_volume / high_volume
-            'volume_spike': False,  # if 5m volume >> hourly average
-            'alert_percent': 0,  # how much more low volume vs high volume
-            'recommendation': 'safe'  # safe, caution, avoid
-        }
-        
-        try:
-            # Get 5-minute data for most recent volume info
-            five_min_info = self.five_min_data.get(item_id)
-            if not five_min_info:
-                return result
-                
-            high_vol = five_min_info.get('high_volume', 0)
-            low_vol = five_min_info.get('low_volume', 0)
-            
-            # Get hourly volume for comparison
-            hourly_vol = self.volume_data.get(item_id, 0)
-            
-            result['high_volume'] = high_vol
-            result['low_volume'] = low_vol
-            result['hourly_volume'] = hourly_vol
-            
-            # Check for volume spike (5m volume vs hourly average)
-            if hourly_vol > 0:
-                # Convert hourly to 5-minute average for comparison
-                hourly_avg_5min = hourly_vol / 12  # 12 five-minute periods in an hour
-                current_5min_total = high_vol + low_vol
-                
-                if current_5min_total > (hourly_avg_5min * 3):  # 3x normal volume
-                    result['volume_spike'] = True
-            
-            # Calculate volume imbalance analysis
-            if high_vol > 0:
-                volume_ratio = low_vol / high_vol
-                result['volume_ratio'] = round(volume_ratio, 1)
-                result['alert_percent'] = round((volume_ratio - 1) * 100, 1)
-            else:
-                # If no high volume but there's low volume, that's concerning
-                if low_vol > 0:
-                    result['volume_ratio'] = 999  # Effectively infinite
-                    result['alert_percent'] = 999
-                else:
-                    return result
-            
-            # Determine status based on volume imbalance AND volume spikes
-            crash_score = 0
-            
-            # Volume imbalance scoring
-            if result['volume_ratio'] >= 5.0:  # 5x more selling than buying
-                crash_score += 30
-            elif result['volume_ratio'] >= 3.0:  # 3x more selling
-                crash_score += 20
-            elif result['volume_ratio'] >= 2.0:  # 2x more selling
-                crash_score += 10
-            
-            # Volume spike bonus (dump signal)
-            if result['volume_spike']:
-                crash_score += 15
-            
-            # Final status determination
-            if crash_score >= 35:
-                result['status'] = 'crashing'
-                result['recommendation'] = 'buy low'
-            elif crash_score >= 20:
-                result['status'] = 'crash_risk'
-                result['recommendation'] = 'consider buying'
-            else:
-                result['status'] = 'stable'
-                result['recommendation'] = 'stable'
-                
-        except Exception as e:
-            result['status'] = 'error'
-            
-        return result
+        return risk.analyze_alchemy_crash_risk(item_id, self.five_min_data, self.volume_data)
 
     def analyze_flipping_trend(self, item_id: int) -> Dict:
         """
         Simplified flipping trend analysis for Discord alerts
-        
+
         Args:
             item_id: Item ID to analyze
-            
+
         Returns:
             Dictionary with simple trend analysis
         """
-        result = {
-            'status': 'stable',  # stable, crash_risk, crashing, surge_risk, surging
-            'high_volume': 0,
-            'low_volume': 0,
-            'hourly_volume': 0,
-            'volume_spike': False,
-            'price_change_percent': 0,  # positive = rising, negative = falling
-            'recommendation': 'safe'  # safe, caution, avoid, opportunity
-        }
-        
-        try:
-            # Get current and 5-minute data
-            current_price = self.current_prices.get(str(item_id))
-            five_min_info = self.five_min_data.get(item_id)
-            hourly_vol = self.volume_data.get(item_id, 0)
-            
-            if not current_price or not five_min_info:
-                return result
-                
-            # Volume data
-            result['high_volume'] = five_min_info.get('high_volume', 0)
-            result['low_volume'] = five_min_info.get('low_volume', 0)
-            result['hourly_volume'] = hourly_vol
-            
-            # Check for volume spike
-            if hourly_vol > 0:
-                hourly_avg_5min = hourly_vol / 12
-                current_5min_total = result['high_volume'] + result['low_volume']
-                if current_5min_total > (hourly_avg_5min * 3):
-                    result['volume_spike'] = True
-            
-            # Price change analysis (focus on high price for flipping)
-            current_high = current_price.get('high')
-            five_min_high = five_min_info.get('high')
-            
-            if current_high and five_min_high and five_min_high > 0:
-                price_change = ((current_high - five_min_high) / five_min_high) * 100
-                result['price_change_percent'] = round(price_change, 1)
-                
-                # Volume analysis for confirmation
-                high_vol = result['high_volume']
-                low_vol = result['low_volume']
-                volume_imbalance = False
-                
-                if high_vol > 0:
-                    volume_ratio = low_vol / high_vol
-                    volume_imbalance = volume_ratio > 2.0  # More selling than buying
-                elif low_vol > 10:  # Selling with no buying
-                    volume_imbalance = True
-                
-                # Determine status with volume spike consideration
-                crash_score = 0
-                surge_score = 0
-                
-                # Price movement scoring
-                if price_change <= -5.0:
-                    crash_score += 30
-                elif price_change <= -2.0:
-                    crash_score += 15
-                elif price_change >= 5.0:
-                    surge_score += 30
-                elif price_change >= 2.0:
-                    surge_score += 15
-                
-                # Volume factors
-                if volume_imbalance:
-                    crash_score += 15
-                if result['volume_spike'] and price_change < -1:
-                    crash_score += 20  # Volume spike + price drop = dump
-                if result['volume_spike'] and price_change > 1:
-                    surge_score += 10  # Volume spike + price rise = pump (could be good or bad)
-                
-                # Final determination
-                if crash_score >= 35:
-                    result['status'] = 'crashing'
-                    result['recommendation'] = 'avoid'
-                elif crash_score >= 20:
-                    result['status'] = 'crash_risk'
-                    result['recommendation'] = 'caution'
-                elif surge_score >= 35:
-                    result['status'] = 'surging'
-                    result['recommendation'] = 'opportunity'
-                elif surge_score >= 15:
-                    result['status'] = 'surge_risk'
-                    result['recommendation'] = 'caution'
-                else:
-                    result['status'] = 'stable'
-                    result['recommendation'] = 'safe'
-                        
-        except Exception as e:
-            result['status'] = 'error'
-            
-        return result
+        return risk.analyze_flipping_trend(
+            item_id, self.current_prices, self.five_min_data, self.volume_data
+        )
 
     def get_alchemy_alerts(self, min_profit: int = 100, min_volume_imbalance: float = 2.0,
                         min_limit: int = None, min_volume: int = None) -> List[Dict]:

@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 import re
 
-from ge-tracker import OSRSAlchemyFlippingCalculator
+from ge_tracker import OSRSAlchemyFlippingCalculator
 
 
 @dataclass
