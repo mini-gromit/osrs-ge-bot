@@ -603,7 +603,7 @@ class OSRSAlchemyFlippingCalculator:
         )
 
     def get_alchemy_alerts(self, min_profit: int = 100, min_volume_imbalance: float = 2.0,
-                        min_limit: int = None, min_volume: int = None) -> List[Dict]:
+                        min_limit: int = None, min_volume: int = None):
         """
         Get alchemy items with crash risk alerts.
 
@@ -614,13 +614,13 @@ class OSRSAlchemyFlippingCalculator:
             min_volume: Minimum volume filter
 
         Returns:
-            List of alchemy items with crash risk
+            List of CrashRiskEvent objects
         """
         return alchemy_alerts.get_alchemy_crash_alerts(
             self, min_profit, min_volume_imbalance, min_limit, min_volume
         )
 
-    def get_flipping_alerts(self, min_margin: int = 1000, min_volume: int = 20) -> List[Dict]:
+    def get_flipping_alerts(self, min_margin: int = 1000, min_volume: int = 20):
         """
         Get flipping items with trend alerts.
 
@@ -629,7 +629,7 @@ class OSRSAlchemyFlippingCalculator:
             min_volume: Minimum volume to consider
 
         Returns:
-            List of flipping items with trend alerts
+            List of FlippingTrendEvent objects
         """
         return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume)
 

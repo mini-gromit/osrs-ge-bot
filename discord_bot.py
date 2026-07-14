@@ -10,7 +10,7 @@ import aiohttp
 from dotenv import load_dotenv
 import os
 
-from ge_tracker import OSRSAlchemyFlippingCalculator
+from engine import OSRSAlchemyFlippingCalculator
 from bot.config import ChannelConfig, ConfigManager
 from bot.notifications import UserNotificationManager
 from bot.converters import FlexibleChannelConverter

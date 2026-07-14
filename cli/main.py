@@ -169,9 +169,9 @@ def run_alchemy_analysis(calculator, min_profit: int = 0, max_items: int = 100,
         profitable_item_ids = {item['item_id'] for item in profitable_items}
 
         relevant_alerts = [alert for alert in crash_alerts
-                        if alert['item_id'] in profitable_item_ids]
+                        if alert.item_id in profitable_item_ids]
         other_alerts = [alert for alert in crash_alerts
-                    if alert['item_id'] not in profitable_item_ids]
+                    if alert.item_id not in profitable_item_ids]
 
         if relevant_alerts:
             print(f"\n🚨 CRASH RISK FOR YOUR ITEMS ({len(relevant_alerts)} items):")
@@ -180,15 +180,15 @@ def run_alchemy_analysis(calculator, min_profit: int = 0, max_items: int = 100,
             print("-" * 70)
 
             for alert in relevant_alerts:
-                status_emoji = '🔴' if alert['status'] == 'crashing' else '🟡'
-                rec_emoji = '🔥' if alert['recommendation'] == 'buy low' else '⚠️'
+                status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
+                rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
 
-                print(f"{status_emoji} {alert['name'][:23]:<23} | "
-                    f"{alert['profit']:>7,.0f} | "
-                    f"{alert['status']:<12} | "
-                    f"{alert['volume_ratio']:>8.1f}x | "
-                    f"{alert['alert_percent']:>6.1f}% | "
-                    f"{rec_emoji} {alert['recommendation'].upper()}")
+                print(f"{status_emoji} {alert.name[:23]:<23} | "
+                    f"{alert.profit:>7,.0f} | "
+                    f"{alert.status:<12} | "
+                    f"{alert.volume_ratio:>8.1f}x | "
+                    f"{alert.alert_percent:>6.1f}% | "
+                    f"{rec_emoji} {alert.recommendation.upper()}")
         else:
             print("\n✅ No crash risks detected for your profitable alchemy items")
             print("All your items show healthy volume balance")
@@ -198,11 +198,11 @@ def run_alchemy_analysis(calculator, min_profit: int = 0, max_items: int = 100,
             print("-" * 70)
 
             for alert in other_alerts[:5]:
-                status_emoji = '🔴' if alert['status'] == 'crashing' else '🟡'
-                print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                    f"Profit: {alert['profit']:>6,.0f} | "
-                    f"Vol Ratio: {alert['volume_ratio']:>5.1f}x | "
-                    f"Status: {alert['status']}")
+                status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
+                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                    f"Profit: {alert.profit:>6,.0f} | "
+                    f"Vol Ratio: {alert.volume_ratio:>5.1f}x | "
+                    f"Status: {alert.status}")
 
     if save_csv_file:
         save_to_csv(profitable_items, "alchemy_profits.csv")
@@ -228,11 +228,11 @@ def run_alchemy_analysis(calculator, min_profit: int = 0, max_items: int = 100,
             crash_alerts = calculator.get_alchemy_alerts(alert_min_profit, alert_min_imbalance)
             profitable_item_ids = {item['item_id'] for item in profitable_items}
             relevant_alerts = [alert for alert in crash_alerts
-                            if alert['item_id'] in profitable_item_ids]
+                            if alert.item_id in profitable_item_ids]
 
             alert_counts = {}
             for alert in relevant_alerts:
-                status = alert['status']
+                status = alert.status
                 alert_counts[status] = alert_counts.get(status, 0) + 1
 
             print(f"\nCrash Alert Summary for Your Items:")
@@ -335,7 +335,7 @@ def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
 
         flip_item_ids = {flip['id'] for flip in flips}
         relevant_alerts = [alert for alert in flipping_alerts
-                        if alert['item_id'] in flip_item_ids]
+                        if alert.item_id in flip_item_ids]
 
         if relevant_alerts:
             print(f"\n🚨 ACTIVE ALERTS ({len(relevant_alerts)} items):")
@@ -347,26 +347,26 @@ def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
                     'crash_risk': '🟡',
                     'surging': '🟢',
                     'surge_risk': '🟠'
-                }.get(alert['status'], '⚪')
+                }.get(alert.status, '⚪')
 
                 recommendation_emoji = {
                     'avoid': '❌',
                     'caution': '⚠️',
                     'opportunity': '💰',
                     'safe': '✅'
-                }.get(alert['recommendation'], '❓')
+                }.get(alert.recommendation, '❓')
 
-                print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                    f"Status: {alert['status']:<12} | "
-                    f"Price Δ: {alert['price_change_percent']:>6.1f}% | "
-                    f"Vol: {alert['high_volume']:>4}/{alert['low_volume']:<4} | "
-                    f"{recommendation_emoji} {alert['recommendation'].upper()}")
+                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                    f"Status: {alert.status:<12} | "
+                    f"Price Δ: {alert.price_change_percent:>6.1f}% | "
+                    f"Vol: {alert.high_volume:>4}/{alert.low_volume:<4} | "
+                    f"{recommendation_emoji} {alert.recommendation.upper()}")
         else:
             print("\n✅ No significant alerts for your current flipping opportunities")
             print("All items appear stable based on recent 5-minute data")
 
         other_alerts = [alert for alert in flipping_alerts
-                    if alert['item_id'] not in flip_item_ids]
+                    if alert.item_id not in flip_item_ids]
 
         if other_alerts:
             print(f"\n📊 OTHER MARKET MOVEMENTS ({len(other_alerts[:10])} of {len(other_alerts)}):")
@@ -378,12 +378,12 @@ def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
                     'crash_risk': '🟡',
                     'surging': '🟢',
                     'surge_risk': '🟠'
-                }.get(alert['status'], '⚪')
+                }.get(alert.status, '⚪')
 
-                print(f"{status_emoji} {alert['name'][:30]:<30} | "
-                    f"Status: {alert['status']:<12} | "
-                    f"Price Δ: {alert['price_change_percent']:>6.1f}% | "
-                    f"Margin: {alert['margin']:>8,.0f}gp")
+                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                    f"Status: {alert.status:<12} | "
+                    f"Price Δ: {alert.price_change_percent:>6.1f}% | "
+                    f"Margin: {alert.margin:>8,.0f}gp")
 
     if save_csv_file:
         save_to_csv(flips, "enhanced_flipping_opportunities.csv")
@@ -417,11 +417,11 @@ def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
             flipping_alerts = calculator.get_flipping_alerts(alert_min_margin, alert_min_volume)
             flip_item_ids = {flip['id'] for flip in flips}
             relevant_alerts = [alert for alert in flipping_alerts
-                            if alert['item_id'] in flip_item_ids]
+                            if alert.item_id in flip_item_ids]
 
             alert_counts = {}
             for alert in relevant_alerts:
-                status = alert['status']
+                status = alert.status
                 alert_counts[status] = alert_counts.get(status, 0) + 1
 
             print(f"\nAlert Summary for Your Items:")
