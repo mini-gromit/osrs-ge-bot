@@ -8,139 +8,11 @@ from typing import Dict, List, Optional, Set
 import aiohttp
 from dotenv import load_dotenv
 import os
-from dataclasses import dataclass, field
-import re
 
 from ge_tracker import OSRSAlchemyFlippingCalculator
-
-
-@dataclass
-class ChannelConfig:
-    super_hot_items: int
-    hot_items: int
-    welcome_channel: Optional[int] = None
-    all_alchs: Optional[int] = None
-    f2p_alchs: Optional[int] = None
-
-    super_hot_message_id: Optional[int] = None
-    hot_items_message_id: Optional[int] = None
-    all_alchs_message_id: Optional[int] = None
-    f2p_alchs_message_id: Optional[int] = None
-
-
-# ------------------------------------------------------------------ #
-# FlexibleChannelConverter
-#
-# Does its own guild lookup instead of delegating to TextChannelConverter,
-# which uses exact case-sensitive name matching and breaks when users type
-# a plain-text channel name like  #super-hot  instead of clicking the
-# channel to insert a proper  <#id>  mention.
-#
-# Resolution order (first match wins):
-#   1. Proper mention  <#123456789>  — Discord inserts this when you click
-#   2. Raw numeric ID  123456789
-#   3. Case-insensitive name match with or without a leading #
-# ------------------------------------------------------------------ #
-class FlexibleChannelConverter(commands.Converter):
-    async def convert(self, ctx, argument: str) -> discord.TextChannel:
-        if not ctx.guild:
-            raise commands.ChannelNotFound(argument)
-
-        # 1. Mention format: <#123456789>
-        mention_match = re.fullmatch(r'<#(\d+)>', argument.strip())
-        if mention_match:
-            channel = ctx.guild.get_channel(int(mention_match.group(1)))
-            if isinstance(channel, discord.TextChannel):
-                return channel
-
-        # 2. Raw numeric ID
-        if argument.strip().isdigit():
-            channel = ctx.guild.get_channel(int(argument.strip()))
-            if isinstance(channel, discord.TextChannel):
-                return channel
-
-        # 3. Case-insensitive name, with or without a leading #
-        name = argument.lstrip('#').strip().lower()
-        for channel in ctx.guild.text_channels:
-            if channel.name.lower() == name:
-                return channel
-
-        raise commands.ChannelNotFound(argument)
-
-
-class UserNotificationManager:
-    def __init__(self, filename='user_notifications.json'):
-        self.filename = filename
-        self.user_subscriptions: Dict[int, Set[str]] = {}
-        self.load_subscriptions()
-
-    def load_subscriptions(self):
-        try:
-            if os.path.exists(self.filename):
-                with open(self.filename, 'r') as f:
-                    data = json.load(f)
-
-                if 'user_subscriptions' in data:
-                    for uid_str, sub_list in data['user_subscriptions'].items():
-                        self.user_subscriptions[int(uid_str)] = set(sub_list)
-
-                print(f"Loaded subscriptions for {len(self.user_subscriptions)} users")
-
-        except Exception as e:
-            print(f"Error loading subscriptions: {e}")
-            self.user_subscriptions = {}
-
-    def save_subscriptions(self):
-        try:
-            serializable = {
-                str(uid): list(subs)
-                for uid, subs in self.user_subscriptions.items()
-            }
-
-            with open(self.filename, 'w') as f:
-                json.dump({
-                    'user_subscriptions': serializable,
-                    'last_updated': datetime.now().isoformat()
-                }, f, indent=2)
-
-        except Exception as e:
-            print(f"Error saving subscriptions: {e}")
-
-    def subscribe_user(self, user_id: int, notification_type: str):
-        self.user_subscriptions.setdefault(user_id, set())
-
-        if notification_type not in self.user_subscriptions[user_id]:
-            self.user_subscriptions[user_id].add(notification_type)
-            self.save_subscriptions()
-            return True
-
-        return False
-
-    def unsubscribe_user(self, user_id: int, notification_type: str = None):
-        if user_id not in self.user_subscriptions:
-            return False
-
-        if notification_type is None:
-            del self.user_subscriptions[user_id]
-            self.save_subscriptions()
-            return True
-
-        if notification_type in self.user_subscriptions[user_id]:
-            self.user_subscriptions[user_id].remove(notification_type)
-
-            if not self.user_subscriptions[user_id]:
-                del self.user_subscriptions[user_id]
-
-            self.save_subscriptions()
-            return True
-
-        return False
-
-    def get_subscribers_for_type(self, notification_type: str):
-        return {
-            uid for uid, subs in self.user_subscriptions.items()
-            if notification_type in subs
-        }
+from bot.config import ChannelConfig, ConfigManager
+from bot.notifications import UserNotificationManager
+from bot.converters import FlexibleChannelConverter
 
 
 class OSRSAlchemyBot(commands.Bot):
@@ -155,15 +27,20 @@ class OSRSAlchemyBot(commands.Bot):
         )
 
         self.calculator = OSRSAlchemyFlippingCalculator()
-
-        self.channel_config = None
+        self.config_manager = ConfigManager()
         self.notification_manager = UserNotificationManager()
 
+        self.channel_config = None
         self.last_update = None
         self.is_monitoring = False
         self.opt_in_message_id = None
 
         self.persistence_minutes = 2
+
+        self.hot_items_min_profit = 450
+        self.super_hot_min_profit = 1000
+        self.all_alchs_min_profit = 1
+        self.f2p_alchs_min_profit = 1
 
         self.last_notification_items = {
             'super_hot': [],
@@ -199,13 +76,6 @@ class OSRSAlchemyBot(commands.Bot):
             },
         }
 
-        # Profit thresholds
-        self.hot_items_min_profit = 450
-        self.super_hot_min_profit = 1000
-        self.all_alchs_min_profit = 1
-        self.f2p_alchs_min_profit = 1
-
-        # Shared filter params
         self.super_hot_max_items = 20
         self.super_hot_min_limit = 7
         self.super_hot_min_volume = 20
@@ -282,72 +152,31 @@ class OSRSAlchemyBot(commands.Bot):
                 print(f"Could not DM user {user_id}: {e}")
 
     async def load_channel_config(self):
-        try:
-            if os.path.exists('channel_config.json'):
-                with open('channel_config.json', 'r') as f:
-                    cfg = json.load(f)
+        """Load channel configuration using ConfigManager"""
+        self.channel_config = self.config_manager.load_config()
 
-                self.channel_config = ChannelConfig(
-                    super_hot_items=cfg['super_hot_items'],
-                    hot_items=cfg['hot_items'],
-                    welcome_channel=cfg.get('welcome_channel'),
-                    all_alchs=cfg.get('all_alchs'),
-                    f2p_alchs=cfg.get('f2p_alchs'),
-                    super_hot_message_id=cfg.get('super_hot_message_id'),
-                    hot_items_message_id=cfg.get('hot_items_message_id'),
-                    all_alchs_message_id=cfg.get('all_alchs_message_id'),
-                    f2p_alchs_message_id=cfg.get('f2p_alchs_message_id'),
-                )
-
-                self.opt_in_message_id = cfg.get('opt_in_message_id')
-
-                self.hot_items_min_profit = cfg.get(
-                    'hot_items_min_profit', self.hot_items_min_profit
-                )
-                self.super_hot_min_profit = cfg.get(
-                    'super_hot_min_profit', self.super_hot_min_profit
-                )
-                self.all_alchs_min_profit = cfg.get(
-                    'all_alchs_min_profit', self.all_alchs_min_profit
-                )
-                self.f2p_alchs_min_profit = cfg.get(
-                    'f2p_alchs_min_profit', self.f2p_alchs_min_profit
-                )
-
-                print("Channel config loaded successfully.")
-
-            else:
-                print("No channel config found.")
-
-        except Exception as e:
-            print(f"Error loading config: {e}")
+        if self.channel_config:
+            self.hot_items_min_profit = self.config_manager.profit_thresholds.hot_items_min_profit
+            self.super_hot_min_profit = self.config_manager.profit_thresholds.super_hot_min_profit
+            self.all_alchs_min_profit = self.config_manager.profit_thresholds.all_alchs_min_profit
+            self.f2p_alchs_min_profit = self.config_manager.profit_thresholds.f2p_alchs_min_profit
+            self.opt_in_message_id = self.channel_config.opt_in_message_id
+            print("Channel config loaded successfully.")
+        else:
+            print("No channel config found.")
 
     async def save_channel_config(self):
+        """Save channel configuration using ConfigManager"""
         if not self.channel_config:
             return
 
-        cfg = {
-            'super_hot_items':      self.channel_config.super_hot_items,
-            'hot_items':            self.channel_config.hot_items,
-            'welcome_channel':      self.channel_config.welcome_channel,
-            'all_alchs':            self.channel_config.all_alchs,
-            'f2p_alchs':            self.channel_config.f2p_alchs,
+        self.config_manager.profit_thresholds.hot_items_min_profit = self.hot_items_min_profit
+        self.config_manager.profit_thresholds.super_hot_min_profit = self.super_hot_min_profit
+        self.config_manager.profit_thresholds.all_alchs_min_profit = self.all_alchs_min_profit
+        self.config_manager.profit_thresholds.f2p_alchs_min_profit = self.f2p_alchs_min_profit
+        self.channel_config.opt_in_message_id = self.opt_in_message_id
 
-            'super_hot_message_id': self.channel_config.super_hot_message_id,
-            'hot_items_message_id': self.channel_config.hot_items_message_id,
-            'all_alchs_message_id': self.channel_config.all_alchs_message_id,
-            'f2p_alchs_message_id': self.channel_config.f2p_alchs_message_id,
-
-            'opt_in_message_id':    self.opt_in_message_id,
-
-            'hot_items_min_profit':  self.hot_items_min_profit,
-            'super_hot_min_profit':  self.super_hot_min_profit,
-            'all_alchs_min_profit':  self.all_alchs_min_profit,
-            'f2p_alchs_min_profit':  self.f2p_alchs_min_profit,
-        }
-
-        with open('channel_config.json', 'w') as f:
-            json.dump(cfg, f, indent=2)
+        self.config_manager.save_config(self.channel_config)
 
     def get_item_ge_tracker_url(self, item_id=None, item_name=None):
         if item_id:
@@ -880,19 +709,19 @@ async def test_cmd(ctx):
     await ctx.send("✅ Test update complete.")
 
 
-def setup_bot():
+async def setup_bot():
+    """Setup and configure the bot"""
     bot = OSRSAlchemyBot()
 
-    bot.add_command(setup_channels)
-    bot.add_command(setup_help)
-    bot.add_command(create_optin)
-    bot.add_command(status_cmd)
+    await bot.load_extension('bot.cogs.setup')
+
     bot.add_command(test_cmd)
 
     return bot
 
 
-if __name__ == "__main__":
+async def main():
+    """Main entry point"""
     load_dotenv()
 
     TOKEN = os.getenv('DISCORD_APP_TOKEN')
@@ -901,5 +730,9 @@ if __name__ == "__main__":
         print("DISCORD_APP_TOKEN missing")
         exit(1)
 
-    bot = setup_bot()
-    bot.run(TOKEN)
+    bot = await setup_bot()
+    await bot.start(TOKEN)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

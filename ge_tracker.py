@@ -7,6 +7,7 @@ import math
 
 from api.client import OSRSAPIClient
 from domain import alchemy, flipping, risk
+from alerts import alchemy as alchemy_alerts, flipping as flipping_alerts
 
 class OSRSAlchemyFlippingCalculator:
     def __init__(self):
@@ -613,129 +614,33 @@ class OSRSAlchemyFlippingCalculator:
     def get_alchemy_alerts(self, min_profit: int = 100, min_volume_imbalance: float = 2.0,
                         min_limit: int = None, min_volume: int = None) -> List[Dict]:
         """
-        Get alchemy items with crash risk alerts for Discord bot
-    
+        Get alchemy items with crash risk alerts.
+
         Args:
             min_profit: Minimum profit to consider alerting about
             min_volume_imbalance: Minimum ratio of low_volume/high_volume to alert
-        
+            min_limit: Minimum trade limit filter
+            min_volume: Minimum volume filter
+
         Returns:
             List of alchemy items with crash risk
         """
-        alerts = []
-    
-        # FIXED: Check if five_min_data exists AND has items
-        if not hasattr(self, 'five_min_data') or not self.five_min_data or len(self.five_min_data) == 0:
-            print("⚠️ No 5-minute data available, fetching...")
-            try:
-                self.fetch_five_minute_data()
-                if not self.five_min_data or len(self.five_min_data) == 0:
-                    print("❌ Still no 5-minute data after fetch - cannot generate alchemy alerts")
-                    return []
-                print(f"✅ Fetched 5-minute data for {len(self.five_min_data)} items")
-            except Exception as e:
-                print(f"❌ Failed to fetch 5-minute data: {e}")
-                return []
-    
-        # Get profitable alchemy items
-        print(f"🔍 Looking for profitable items with profit ≥ {min_profit}gp...")
-        profitable_items = self.get_profitable_items(min_profit=min_profit, max_items=200, min_limit=min_limit,
-                                                    min_volume=min_volume)
-        
-        print(f"📊 Found {len(profitable_items)} profitable alchemy items to analyze")
-    
-        for item in profitable_items:
-            item_id = item['item_id']
-        
-            # Analyze crash risk
-            try:
-                crash_analysis = self.analyze_alchemy_crash_risk(item_id)
-                
-                # Debug logging for first few items
-                if len(alerts) < 3:
-                    print(f"🔍 {item['name']}: status={crash_analysis.get('status', 'unknown')}, "
-                        f"volume_ratio={crash_analysis.get('volume_ratio', 0):.2f}")
-            except Exception as e:
-                print(f"⚠️ Error analyzing {item['name']}: {e}")
-                continue
-        
-            # Only alert if there's risk and volume imbalance meets threshold
-            if (crash_analysis.get('status') in ['crash_risk', 'crashing'] and
-                crash_analysis.get('volume_ratio', 0) >= min_volume_imbalance):
-            
-                alerts.append({
-                    'name': item['name'],
-                    'item_id': item_id,
-                    'profit': item['profit'],
-                    'buy_price': item['buy_price'],
-                    'alch_value': item['high_alch_value'],
-                    'status': crash_analysis['status'],
-                    'high_volume': crash_analysis['high_volume'],
-                    'low_volume': crash_analysis['low_volume'],
-                    'volume_ratio': crash_analysis['volume_ratio'],
-                    'alert_percent': crash_analysis.get('alert_percent', 0),
-                    'recommendation': crash_analysis.get('recommendation', 'unknown')
-                })
-                
-                print(f"✅ Added alert for {item['name']}: {crash_analysis['status']}")
-    
-        print(f"🚨 Generated {len(alerts)} alchemy crash alerts")
-        
-        # Sort by volume ratio (most concerning first)  
-        alerts.sort(key=lambda x: x['volume_ratio'], reverse=True)
-    
-        return alerts
+        return alchemy_alerts.get_alchemy_crash_alerts(
+            self, min_profit, min_volume_imbalance, min_limit, min_volume
+        )
 
     def get_flipping_alerts(self, min_margin: int = 1000, min_volume: int = 20) -> List[Dict]:
         """
-        Get flipping items with trend alerts for Discord bot
-        
+        Get flipping items with trend alerts.
+
         Args:
             min_margin: Minimum margin to consider
             min_volume: Minimum volume to consider
-            
+
         Returns:
             List of flipping items with trend alerts
         """
-        alerts = []
-        
-        # Ensure we have required data
-        if not self.five_min_data:
-            self.fetch_five_minute_data()
-        
-        # Get current flipping opportunities
-        flips = self.get_top_flips(
-            limit=100,
-            min_margin=min_margin,
-            min_volume=min_volume,
-            fetch_history=False  # Skip history for speed
-        )
-        
-        for flip in flips:
-            item_id = flip['id']
-            
-            # Analyze trend
-            trend_analysis = self.analyze_flipping_trend(item_id)
-            
-            # Only alert if there's significant movement or risk
-            if trend_analysis['status'] != 'stable':
-                alerts.append({
-                    'name': flip['name'],
-                    'item_id': item_id,
-                    'buy_price': flip['buy_price'],
-                    'sell_price': flip['sell_price'],
-                    'margin': flip['margin'],
-                    'status': trend_analysis['status'],
-                    'price_change_percent': trend_analysis['price_change_percent'],
-                    'high_volume': trend_analysis['high_volume'],
-                    'low_volume': trend_analysis['low_volume'],
-                    'recommendation': trend_analysis['recommendation']
-                })
-        
-        # Sort by price change magnitude (biggest moves first)
-        alerts.sort(key=lambda x: abs(x['price_change_percent']), reverse=True)
-        
-        return alerts
+        return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume)
 
 if __name__ == "__main__":
     from cli import main as cli
