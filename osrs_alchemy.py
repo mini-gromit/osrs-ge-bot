@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 import asyncio
 import json
 import time
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 import aiohttp
@@ -13,6 +14,9 @@ from ge_tracker import OSRSAlchemyFlippingCalculator
 from bot.config import ChannelConfig, ConfigManager
 from bot.notifications import UserNotificationManager
 from bot.converters import FlexibleChannelConverter
+import config
+
+logger = logging.getLogger(__name__)
 
 
 class OSRSAlchemyBot(commands.Bot):
@@ -35,12 +39,12 @@ class OSRSAlchemyBot(commands.Bot):
         self.is_monitoring = False
         self.opt_in_message_id = None
 
-        self.persistence_minutes = 2
+        self.persistence_minutes = config.ALERT_PERSISTENCE_MINUTES
 
-        self.hot_items_min_profit = 450
-        self.super_hot_min_profit = 1000
-        self.all_alchs_min_profit = 1
-        self.f2p_alchs_min_profit = 1
+        self.hot_items_min_profit = config.DEFAULT_HOT_ITEMS_MIN_PROFIT
+        self.super_hot_min_profit = config.DEFAULT_SUPER_HOT_MIN_PROFIT
+        self.all_alchs_min_profit = config.DEFAULT_ALL_ALCHS_MIN_PROFIT
+        self.f2p_alchs_min_profit = config.DEFAULT_F2P_ALCHS_MIN_PROFIT
 
         self.last_notification_items = {
             'super_hot': [],
@@ -76,10 +80,10 @@ class OSRSAlchemyBot(commands.Bot):
             },
         }
 
-        self.super_hot_max_items = 20
-        self.super_hot_min_limit = 7
-        self.super_hot_min_volume = 20
-        self.super_hot_max_roi = 225
+        self.super_hot_max_items = config.SUPER_HOT_MAX_ITEMS
+        self.super_hot_min_limit = config.SUPER_HOT_MIN_LIMIT
+        self.super_hot_min_volume = config.SUPER_HOT_MIN_VOLUME
+        self.super_hot_max_roi = config.SUPER_HOT_MAX_ROI
 
     # Emoji → (notification_type, display_label) mapping.
     # Drives the opt-in embed, reaction list, handler, and DM confirmations.
@@ -92,8 +96,8 @@ class OSRSAlchemyBot(commands.Bot):
     }
 
     async def on_ready(self):
-        print(f'{self.user} has connected to Discord!')
-        print(f'Bot is in {len(self.guilds)} guilds')
+        logger.info(f'{self.user} has connected to Discord!')
+        logger.info(f'Bot is in {len(self.guilds)} guilds')
 
         await self.load_channel_config()
 
@@ -122,7 +126,7 @@ class OSRSAlchemyBot(commands.Bot):
         try:
             user = await self.fetch_user(user_id)
         except Exception as e:
-            print(f"Could not fetch user {user_id}: {e}")
+            logger.warning(f"Could not fetch user {user_id}: {e}")
             return
 
         if not user:
@@ -136,7 +140,7 @@ class OSRSAlchemyBot(commands.Bot):
                         "🔕 You've been unsubscribed from all alchemy alerts."
                     )
                 except Exception as e:
-                    print(f"Could not DM user {user_id}: {e}")
+                    logger.warning(f"Could not DM user {user_id}: {e}")
             return
 
         subscribed = self.notification_manager.subscribe_user(
@@ -149,7 +153,7 @@ class OSRSAlchemyBot(commands.Bot):
                     f"✅ You're now subscribed to **{label}** alchemy alerts!"
                 )
             except Exception as e:
-                print(f"Could not DM user {user_id}: {e}")
+                logger.warning(f"Could not DM user {user_id}: {e}")
 
     async def load_channel_config(self):
         """Load channel configuration using ConfigManager"""
@@ -161,9 +165,9 @@ class OSRSAlchemyBot(commands.Bot):
             self.all_alchs_min_profit = self.config_manager.profit_thresholds.all_alchs_min_profit
             self.f2p_alchs_min_profit = self.config_manager.profit_thresholds.f2p_alchs_min_profit
             self.opt_in_message_id = self.channel_config.opt_in_message_id
-            print("Channel config loaded successfully.")
+            logger.info("Channel config loaded successfully.")
         else:
-            print("No channel config found.")
+            logger.info("No channel config found.")
 
     async def save_channel_config(self):
         """Save channel configuration using ConfigManager"""
@@ -226,7 +230,7 @@ class OSRSAlchemyBot(commands.Bot):
         return cache['items']
 
     async def fetch_and_analyze(self):
-        print("🔄 Fetching data for analysis...")
+        logger.info("Fetching data for analysis...")
 
         current_time = time.time()
 
@@ -245,15 +249,15 @@ class OSRSAlchemyBot(commands.Bot):
         try:
             self.calculator.fetch_volume_data()
         except Exception as e:
-            print(f"Volume error: {e}")
+            logger.warning(f"Volume error: {e}")
 
         try:
             self.calculator.fetch_five_minute_data()
         except Exception as e:
-            print(f"5m error: {e}")
+            logger.warning(f"5m error: {e}")
 
-        print(
-            f"🔍 Filtering: "
+        logger.info(
+            f"Filtering: "
             f"super_hot >{self.super_hot_min_profit:,}gp | "
             f"hot >{self.hot_items_min_profit:,}gp | "
             f"all_alchs >{self.all_alchs_min_profit:,}gp | "
@@ -502,12 +506,12 @@ class OSRSAlchemyBot(commands.Bot):
             super_hot, hot_items, all_alchs, f2p_alchs
         )
 
-        print(
-            f"✅ Update complete at "
+        logger.info(
+            f"Update complete at "
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-    @tasks.loop(minutes=2)
+    @tasks.loop(minutes=config.MONITORING_INTERVAL_MINUTES)
     async def monitor_prices_with_links(self):
         try:
             super_hot, hot_items, all_alchs, f2p_alchs = (
@@ -522,14 +526,14 @@ class OSRSAlchemyBot(commands.Bot):
 
         except Exception as e:
             import traceback
-            print(f"Error in monitor loop: {e}")
-            print(traceback.format_exc())
+            logger.error(f"Error in monitor loop: {e}")
+            logger.error(traceback.format_exc())
 
     async def start_monitoring(self):
         if self.is_monitoring:
             return
 
-        print("Running initial update...")
+        logger.info("Running initial update...")
 
         try:
             super_hot, hot_items, all_alchs, f2p_alchs = (
@@ -544,13 +548,13 @@ class OSRSAlchemyBot(commands.Bot):
 
         except Exception as e:
             import traceback
-            print(f"Initial update error: {e}")
-            print(traceback.format_exc())
+            logger.error(f"Initial update error: {e}")
+            logger.error(traceback.format_exc())
 
         self.monitor_prices_with_links.start()
         self.is_monitoring = True
 
-        print("✅ Started monitoring every 2 minutes")
+        logger.info(f"Started monitoring every {config.MONITORING_INTERVAL_MINUTES} minutes")
 
 
 # ------------------------------------------------------------------ #
@@ -724,10 +728,17 @@ async def main():
     """Main entry point"""
     load_dotenv()
 
+    # Configure logging
+    logging.basicConfig(
+        format=config.LOG_FORMAT,
+        datefmt=config.LOG_DATE_FORMAT,
+        level=getattr(logging, config.LOG_LEVEL)
+    )
+
     TOKEN = os.getenv('DISCORD_APP_TOKEN')
 
     if not TOKEN:
-        print("DISCORD_APP_TOKEN missing")
+        logger.error("DISCORD_APP_TOKEN missing")
         exit(1)
 
     bot = await setup_bot()

@@ -1,7 +1,10 @@
 import json
 import os
+import logging
 from dataclasses import dataclass, asdict
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,7 +72,7 @@ class ConfigManager:
             return self.channel_config
 
         except Exception as e:
-            print(f"Error loading config: {e}")
+            logger.error(f"Error loading config: {e}")
             return None
 
     def save_config(self, channel_config: ChannelConfig) -> bool:
@@ -86,7 +89,7 @@ class ConfigManager:
             return True
 
         except Exception as e:
-            print(f"Error saving config: {e}")
+            logger.error(f"Error saving config: {e}")
             return False
 
     def update_message_id(self, category: str, message_id: int) -> bool:
@@ -109,5 +112,5 @@ class ConfigManager:
             return self.save_config(self.channel_config)
 
         except Exception as e:
-            print(f"Error updating message ID: {e}")
+            logger.error(f"Error updating message ID: {e}")
             return False

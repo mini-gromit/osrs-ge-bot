@@ -1,6 +1,7 @@
 import json
 import time
 import statistics
+import logging
 from typing import Dict, List, Optional
 import pandas as pd
 import math
@@ -8,32 +9,25 @@ import math
 from api.client import OSRSAPIClient
 from domain import alchemy, flipping, risk
 from alerts import alchemy as alchemy_alerts, flipping as flipping_alerts
+import config
+
+logger = logging.getLogger(__name__)
 
 class OSRSAlchemyFlippingCalculator:
     def __init__(self):
-        # API client for HTTP requests
         self.client = OSRSAPIClient()
 
-        # Cost of nature rune (you can update this manually or fetch it dynamically)
-        self.nature_rune_cost = 125  # Current cost from my head
-        
-        # Data storage - using existing endpoints for flipping
+        self.nature_rune_cost = config.NATURE_RUNE_COST
+
         self.item_mapping = {}
         self.current_prices = {}
         self.volume_data = {}
         self.five_min_data = {}
-        self.flipping_average_prices = {}  # Store averaged prices for flipping only
-        self.use_flipping_averages = True  # Flag to use averages for flipping
-        self.flipping_history_periods = 300  # How many periods back to average (120 * 6h = 30 days)
+        self.flipping_average_prices = {}
+        self.use_flipping_averages = config.USE_FLIPPING_AVERAGES
+        self.flipping_history_periods = config.FLIPPING_HISTORY_PERIODS
 
-        # Items that are known to not be alchemizable (can be expanded)
-        self.non_alchemizable_keywords = [
-            'noted', '(noted)', 'bank note', 'certificate',
-            'clue', 'casket', 'scroll', 'pet', 'spirit',
-            'teleport', 'tab', 'tablet', 'crystal seed',
-            'broken', 'damaged', 'degraded', 'uncharged',
-            'contract', 'bloodied', 'severance', 'sensory'
-        ]
+        self.non_alchemizable_keywords = config.NON_ALCHEMIZABLE_KEYWORDS
         
     def is_alchemizable(self, item_data: Dict) -> bool:
         """
@@ -52,14 +46,13 @@ class OSRSAlchemyFlippingCalculator:
         Fetch item mapping data including high alchemy values
         Returns True if successful, False otherwise
         """
-        print("Fetching item mapping data...")
+        logger.info("Fetching item mapping data...")
         mapping_data = self.client.fetch_item_mapping()
 
         if mapping_data is None:
-            print("Error fetching item mapping")
+            logger.error("Error fetching item mapping")
             return False
 
-        # Convert list to dict for easier lookup by item ID
         for item in mapping_data:
             self.item_mapping[item['id']] = {
                 'name': item.get('name', 'Unknown'),
@@ -67,12 +60,12 @@ class OSRSAlchemyFlippingCalculator:
                 'members': item.get('members', False),
                 'lowalch': item.get('lowalch', 0),
                 'highalch': item.get('highalch', 0),
-                'limit': item.get('limit', 0),  # Default to 0 if no limit (untradeable items)
+                'limit': item.get('limit', 0),
                 'value': item.get('value', 0),
                 'icon': item.get('icon', '')
             }
 
-        print(f"Successfully fetched mapping for {len(self.item_mapping)} items")
+        logger.info(f"Successfully fetched mapping for {len(self.item_mapping)} items")
         return True
     
     def fetch_volume_data(self) -> bool:
@@ -80,22 +73,20 @@ class OSRSAlchemyFlippingCalculator:
         Fetch volume data from 1-hour endpoint
         Returns True if successful, False otherwise
         """
-        print("Fetching volume data...")
+        logger.info("Fetching volume data...")
         hourly_data = self.client.fetch_volume_data()
 
         if hourly_data is None:
-            print("Error fetching volume data")
+            logger.error("Error fetching volume data")
             return False
 
-        # Convert to dict and extract volume information
         for item_id_str, data in hourly_data.items():
             if 'avgHighPrice' in data and 'avgLowPrice' in data and 'highPriceVolume' in data and 'lowPriceVolume' in data:
                 item_id = int(item_id_str)
-                # Use total volume (high + low price volumes)
                 total_volume = (data.get('highPriceVolume', 0) or 0) + (data.get('lowPriceVolume', 0) or 0)
                 self.volume_data[item_id] = total_volume
 
-        print(f"Successfully fetched volume data for {len(self.volume_data)} items")
+        logger.info(f"Successfully fetched volume data for {len(self.volume_data)} items")
         return True
     
     def fetch_current_prices(self) -> bool:
@@ -103,15 +94,15 @@ class OSRSAlchemyFlippingCalculator:
         Fetch current Grand Exchange prices
         Returns True if successful, False otherwise
         """
-        print("Fetching current GE prices...")
+        logger.info("Fetching current GE prices...")
         price_data = self.client.fetch_current_prices()
 
         if price_data is None:
-            print("Error fetching current prices")
+            logger.error("Error fetching current prices")
             return False
 
         self.current_prices = price_data
-        print(f"Successfully fetched prices for {len(self.current_prices)} items")
+        logger.info(f"Successfully fetched prices for {len(self.current_prices)} items")
         return True
 
     def fetch_five_minute_data(self) -> bool:
@@ -119,11 +110,11 @@ class OSRSAlchemyFlippingCalculator:
         NEW: Fetch 5-minute price data for trend analysis
         Returns True if successful, False otherwise
         """
-        print("Fetching 5-minute price data for trend analysis...")
+        logger.info("Fetching 5-minute price data for trend analysis...")
         five_min_data = self.client.fetch_five_minute_data()
 
         if five_min_data is None:
-            print("Error fetching 5-minute data")
+            logger.error("Error fetching 5-minute data")
             return False
 
         # Convert to dict and extract price information
@@ -138,7 +129,7 @@ class OSRSAlchemyFlippingCalculator:
                     'timestamp': data.get('timestamp')
                 }
 
-        print(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
+        logger.info(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
         return True
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
@@ -154,7 +145,7 @@ class OSRSAlchemyFlippingCalculator:
         """
         data = self.client.fetch_timeseries(item_id, timestep)
         if not data:
-            print(f"Error fetching timeseries for item {item_id}")
+            logger.warning(f"Error fetching timeseries for item {item_id}")
         return data
     
     def detect_pump_and_dump(self, history_prices: List[Dict], current_high: int, current_low: int) -> tuple:
@@ -228,7 +219,7 @@ class OSRSAlchemyFlippingCalculator:
             min_limit, min_volume, max_roi
         )
 
-        print(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
+        logger.info(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
 
         return profitable_items
     
@@ -241,7 +232,7 @@ class OSRSAlchemyFlippingCalculator:
         FIXED: Now properly calculates scores and accounts for GE tax
         """
         if not self.current_prices or not self.volume_data:
-            print("Missing price or volume data. Make sure to fetch current prices and volume data first.")
+            logger.error("Missing price or volume data. Make sure to fetch current prices and volume data first.")
             return []
             
         flips = []
@@ -356,17 +347,17 @@ class OSRSAlchemyFlippingCalculator:
         # FIXED: Limit the number of items we analyze with history
         analysis_limit = min(limit * 2, 15)  # Never more than 15 items for history analysis
         top_candidates = flips[:analysis_limit]
-        
-        print(f"Pre-filtered to {len(flips)} candidates, analyzing top {len(top_candidates)} with history")
-        
+
+        logger.info(f"Pre-filtered to {len(flips)} candidates, analyzing top {len(top_candidates)} with history")
+
         # Second pass: fetch history and calculate enhanced scores
         if fetch_history and top_candidates:
-            print(f"Analyzing price history for top {len(top_candidates)} candidates...")
+            logger.info(f"Analyzing price history for top {len(top_candidates)} candidates...")
             analyzed_flips = []
             
             for i, flip in enumerate(top_candidates):
                 try:
-                    print(f"Fetching history for {flip['name']} ({i+1}/{len(top_candidates)})")
+                    logger.info(f"Fetching history for {flip['name']} ({i+1}/{len(top_candidates)})")
                     ts_data = self.fetch_timeseries(flip['id'], "24h")
                     
                     # FIXED: Use the original prices for score calculation (the method handles GE tax internally)
@@ -395,7 +386,7 @@ class OSRSAlchemyFlippingCalculator:
                     
                     time.sleep(0.1)  # Be kind to the API
                 except Exception as e:
-                    print(f"Error analyzing {flip['name']}: {e}")
+                    logger.warning(f"Error analyzing {flip['name']}: {e}")
                     # FIXED: Still include items that couldn't be analyzed but passed basic filters
                     if flip['score'] >= min_score:
                         analyzed_flips.append(flip)
@@ -403,13 +394,13 @@ class OSRSAlchemyFlippingCalculator:
             
             # Sort by score after analysis
             analyzed_flips.sort(key=lambda x: (x['score'], x['margin']), reverse=True)
-            print(f"History analysis complete: {len(analyzed_flips)} items passed all filters")
+            logger.info(f"History analysis complete: {len(analyzed_flips)} items passed all filters")
             return analyzed_flips[:limit]
         else:
             for flip in flips:
-                flip['score'] = (flip['score'] / 45) * 100            
+                flip['score'] = (flip['score'] / 45) * 100
             # Return without detailed analysis, but still properly scored
-            print(f"Returning {len(top_candidates[:limit])} items with basic scoring")
+            logger.info(f"Returning {len(top_candidates[:limit])} items with basic scoring")
             return top_candidates[:limit]
 
     def get_non_alchemizable_sample(self, sample_size: int = 10) -> List[Dict]:
@@ -433,7 +424,7 @@ class OSRSAlchemyFlippingCalculator:
         Now properly limits the number of items to prevent excessive API calls
         """
         if not self.current_prices:
-            print("No current prices available. Fetch current prices first.")
+            logger.error("No current prices available. Fetch current prices first.")
             return False
             
         # FIXED: If no specific items provided, intelligently select the best candidates
@@ -468,19 +459,19 @@ class OSRSAlchemyFlippingCalculator:
             
             # Sort by a combination of margin and volume, take top candidates
             candidate_items.sort(key=lambda x: x['margin'] * (x['volume'] ** 0.5), reverse=True)
-            
+
             # FIXED: Limit to top 30 candidates maximum to prevent excessive API calls
             max_items = min(30, len(candidate_items))
             item_ids = [item['id'] for item in candidate_items[:max_items]]
-            
-            print(f"Auto-selected {len(item_ids)} promising items from {len(candidate_items)} candidates")
-        
+
+            logger.info(f"Auto-selected {len(item_ids)} promising items from {len(candidate_items)} candidates")
+
         # Additional safety check
         if len(item_ids) > 100:
-            print(f"WARNING: Too many items ({len(item_ids)}), limiting to top 100")
+            logger.warning(f"Too many items ({len(item_ids)}), limiting to top 100")
             item_ids = item_ids[:100]
-        
-        print(f"Fetching flipping average prices for {len(item_ids)} items using {timestep} timestep...")
+
+        logger.info(f"Fetching flipping average prices for {len(item_ids)} items using {timestep} timestep...")
         
         successful_fetches = 0
         failed_fetches = 0
@@ -489,8 +480,8 @@ class OSRSAlchemyFlippingCalculator:
             try:
                 # Progress indicator every 10 items instead of 25
                 if (i + 1) % 10 == 0:
-                    print(f"Processed {i + 1}/{len(item_ids)} items...")
-                
+                    logger.info(f"Processed {i + 1}/{len(item_ids)} items...")
+
                 # Fetch timeseries data
                 ts_data = self.fetch_timeseries(item_id, timestep)
                 
@@ -543,13 +534,13 @@ class OSRSAlchemyFlippingCalculator:
                 
                 # Be respectful to the API - slightly longer delay
                 time.sleep(0.1)  # 100ms delay between requests
-                
+
             except Exception as e:
-                print(f"Error fetching data for item {item_id}: {e}")
+                logger.warning(f"Error fetching data for item {item_id}: {e}")
                 failed_fetches += 1
                 continue
-        
-        print(f"Flipping average price fetching complete: {successful_fetches} successful, {failed_fetches} failed")
+
+        logger.info(f"Flipping average price fetching complete: {successful_fetches} successful, {failed_fetches} failed")
         return successful_fetches > 0
 
     def get_flipping_prices(self, item_id: int) -> Dict:
@@ -643,7 +634,15 @@ class OSRSAlchemyFlippingCalculator:
         return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume)
 
 if __name__ == "__main__":
+    import logging
     from cli import main as cli
+
+    # Configure logging
+    logging.basicConfig(
+        format=config.LOG_FORMAT,
+        datefmt=config.LOG_DATE_FORMAT,
+        level=getattr(logging, config.LOG_LEVEL)
+    )
 
     calculator = OSRSAlchemyFlippingCalculator()
 

@@ -1,7 +1,10 @@
 import json
 import os
+import logging
 from datetime import datetime
 from typing import Dict, Set
+
+logger = logging.getLogger(__name__)
 
 
 class UserNotificationManager:
@@ -23,10 +26,10 @@ class UserNotificationManager:
                     for uid_str, sub_list in data['user_subscriptions'].items():
                         self.user_subscriptions[int(uid_str)] = set(sub_list)
 
-                print(f"Loaded subscriptions for {len(self.user_subscriptions)} users")
+                logger.info(f"Loaded subscriptions for {len(self.user_subscriptions)} users")
 
         except Exception as e:
-            print(f"Error loading subscriptions: {e}")
+            logger.error(f"Error loading subscriptions: {e}")
             self.user_subscriptions = {}
 
     def save_subscriptions(self):
@@ -44,7 +47,7 @@ class UserNotificationManager:
                 }, f, indent=2)
 
         except Exception as e:
-            print(f"Error saving subscriptions: {e}")
+            logger.error(f"Error saving subscriptions: {e}")
 
     def subscribe_user(self, user_id: int, notification_type: str) -> bool:
         """
