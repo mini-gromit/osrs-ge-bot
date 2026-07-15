@@ -47,7 +47,10 @@ def get_flipping_trend_alerts(
                 price_change_percent=trend_analysis["price_change_percent"],
                 high_volume=trend_analysis["high_volume"],
                 low_volume=trend_analysis["low_volume"],
-                recommendation=trend_analysis["recommendation"]
+                recommendation=trend_analysis["recommendation"],
+                severity_score=trend_analysis.get("severity_score", 0),
+                hourly_volume=trend_analysis.get("hourly_volume", 0),
+                volume_spike=trend_analysis.get("volume_spike", False)
             )
 
             alerts.append(event)

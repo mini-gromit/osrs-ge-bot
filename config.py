@@ -53,6 +53,17 @@ MONITORING_INTERVAL_MINUTES = 2
 ALERT_PERSISTENCE_MINUTES = 2
 
 # ============================================================================
+# DATA REFRESH INTERVALS (in seconds)
+# ============================================================================
+
+# How often to refresh different data sources
+REFRESH_INTERVAL_ITEM_MAPPING = 3600      # 1 hour - rarely changes
+REFRESH_INTERVAL_CURRENT_PRICES = 2       # Always refresh - real-time prices
+REFRESH_INTERVAL_VOLUME_DATA = 2          # Always refresh - hourly volume updates
+REFRESH_INTERVAL_FIVE_MINUTE_DATA = 60     # Always refresh - short-term trends
+REFRESH_INTERVAL_TIMESERIES = 300         # 5 minutes - historical data
+
+# ============================================================================
 # LOGGING CONFIGURATION
 # ============================================================================
 

@@ -1,59 +1,13 @@
 from typing import Dict, List
 import pandas as pd
+import logging
 
+from renderers import CLIRenderer
+from engine import OSRSAlchemyFlippingCalculator
+from scheduler import DataScheduler
+from cli.monitor import run_market_monitor_loop 
 
-def display_alchemy_results(items: List[Dict], show_count: int = 20):
-    """Display alchemy results in a formatted table"""
-    if not items:
-        print("No profitable alchemizable items found with the given criteria.")
-        return
-
-    print(f"\nTop {min(show_count, len(items))} High Alchemy Opportunities (Alchemizable Items Only):")
-    print("-" * 140)
-    print(f"{'Rank':<4} {'Item Name':<18} {'Buy Price':<10} {'Alch Value':<10} {'Profit':<8} {'ROI%':<5} {'Limit':<6} {'Max Profit':<10} {'Volume/hr':<10} {'Members'}")
-    print("-" * 140)
-
-    for i, item in enumerate(items[:show_count], 1):
-        members_str = "Yes" if item['members'] else "No"
-        volume_str = f"{item['recent_volume']:,}" if item['recent_volume'] > 0 else "N/A"
-        print(f"{i:<4} {item['name'][:16]:<18} {item['buy_price']:<10,} "
-              f"{item['high_alch_value']:<10,} {item['profit']:<8,} {item['roi_percent']:<5.1f} "
-              f"{item['limit']:<6} {item['max_profit_per_limit']:<10,} {volume_str:<10} {members_str}")
-
-
-def display_flip_results(flips: List[Dict], show_count: int = 20):
-    """Enhanced display with risk indicators"""
-    if not flips:
-        print("No profitable flipping opportunities found with the given criteria.")
-        return
-
-    print(f"\nTop {min(show_count, len(flips))} Flipping Opportunities:")
-    print("-" * 150)
-    print(f"{'Rank':<4} {'Item Name':<25} {'Buy Price':<12} {'Sell Price':<12} {'Margin':<9} {'Margin%':<7} {'Volume':<8} {'Score':<5} {'Risk':<12} {'Members'}")
-    print("-" * 150)
-
-    for i, flip in enumerate(flips[:show_count], 1):
-        members_str = "Yes" if flip['members'] else "No"
-
-        risk_level = flip.get('risk_level', 0)
-        if risk_level >= 3:
-            risk_indicator = "🚨 HIGH"
-        elif risk_level >= 2:
-            risk_indicator = "⚠️ MEDIUM"
-        elif risk_level >= 1:
-            risk_indicator = "⚡ LOW"
-        else:
-            risk_indicator = "✅ Clean"
-
-        print(f"{i:<4} {flip['name'][:23]:<25} {flip['buy_price']:<12,} "
-              f"{flip['sell_price']:<12,} {flip['margin']:<9,} {flip['margin_percent']:<7.1f} "
-              f"{flip['volume']:<8,} {flip['score']:<5.0f} {risk_indicator:<12} {members_str}")
-
-    print(f"\nDetailed Risk Analysis for Top {min(5, len(flips))} Items:")
-    print("-" * 80)
-    for i, flip in enumerate(flips[:min(5, len(flips))], 1):
-        risk_info = flip.get('risk_info', 'No analysis')
-        print(f"{i}. {flip['name']}: {risk_info}")
+logger = logging.getLogger(__name__)
 
 
 def save_to_csv(items: List[Dict], filename: str = "osrs_analysis.csv"):
@@ -154,94 +108,24 @@ def run_alchemy_analysis(calculator, min_profit: int = 0, max_items: int = 100,
         max_roi=max_roi
     )
 
-    display_alchemy_results(profitable_items)
+    CLIRenderer.display_alchemy_results(profitable_items)
 
     if show_crash_alerts and profitable_items:
-        print("\n" + "=" * 70)
-        print("ALCHEMY CRASH RISK ALERTS")
-        print("=" * 70)
-
         crash_alerts = calculator.get_alchemy_alerts(
             min_profit=alert_min_profit,
             min_volume_imbalance=alert_min_imbalance
         )
-
         profitable_item_ids = {item['item_id'] for item in profitable_items}
-
-        relevant_alerts = [alert for alert in crash_alerts
-                        if alert.item_id in profitable_item_ids]
-        other_alerts = [alert for alert in crash_alerts
-                    if alert.item_id not in profitable_item_ids]
-
-        if relevant_alerts:
-            print(f"\n🚨 CRASH RISK FOR YOUR ITEMS ({len(relevant_alerts)} items):")
-            print("-" * 70)
-            print(f"{'Item':<25} | {'Profit':<8} | {'Status':<12} | {'Vol Ratio':<10} | {'Alert %':<8} | {'Rec'}")
-            print("-" * 70)
-
-            for alert in relevant_alerts:
-                status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
-                rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
-
-                print(f"{status_emoji} {alert.name[:23]:<23} | "
-                    f"{alert.profit:>7,.0f} | "
-                    f"{alert.status:<12} | "
-                    f"{alert.volume_ratio:>8.1f}x | "
-                    f"{alert.alert_percent:>6.1f}% | "
-                    f"{rec_emoji} {alert.recommendation.upper()}")
-        else:
-            print("\n✅ No crash risks detected for your profitable alchemy items")
-            print("All your items show healthy volume balance")
-
-        if other_alerts:
-            print(f"\n📊 OTHER ALCHEMY CRASH RISKS ({len(other_alerts[:5])} of {len(other_alerts)}):")
-            print("-" * 70)
-
-            for alert in other_alerts[:5]:
-                status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
-                    f"Profit: {alert.profit:>6,.0f} | "
-                    f"Vol Ratio: {alert.volume_ratio:>5.1f}x | "
-                    f"Status: {alert.status}")
+        CLIRenderer.display_alchemy_crash_alerts(crash_alerts, profitable_item_ids)
 
     if save_csv_file:
         save_to_csv(profitable_items, "alchemy_profits.csv")
 
     if profitable_items:
-        total_profitable = len(profitable_items)
-        avg_profit = sum(item['profit'] for item in profitable_items) / total_profitable
-        max_profit = profitable_items[0]['profit'] if profitable_items else 0
-        avg_volume = sum(item['recent_volume'] for item in profitable_items) / total_profitable
-        avg_roi = sum(item['roi_percent'] for item in profitable_items) / total_profitable
-
-        print(f"\n" + "=" * 70)
-        print("SUMMARY")
-        print("=" * 70)
-        print(f"Total profitable alchemizable items found: {total_profitable}")
-        print(f"Average profit per cast: {avg_profit:,.1f} gp")
-        print(f"Maximum profit per cast: {max_profit:,} gp")
-        print(f"Average ROI: {avg_roi:.1f}%")
-        print(f"Average hourly volume: {avg_volume:,.0f}")
-        print(f"Nature rune cost used: {calculator.nature_rune_cost} gp")
-
+        crash_alerts = None
         if show_crash_alerts:
             crash_alerts = calculator.get_alchemy_alerts(alert_min_profit, alert_min_imbalance)
-            profitable_item_ids = {item['item_id'] for item in profitable_items}
-            relevant_alerts = [alert for alert in crash_alerts
-                            if alert.item_id in profitable_item_ids]
-
-            alert_counts = {}
-            for alert in relevant_alerts:
-                status = alert.status
-                alert_counts[status] = alert_counts.get(status, 0) + 1
-
-            print(f"\nCrash Alert Summary for Your Items:")
-            if alert_counts:
-                for status, count in alert_counts.items():
-                    emoji = '🔴' if status == 'crashing' else '🟡'
-                    print(f"  {emoji} {status.replace('_', ' ').title()}: {count}")
-            else:
-                print(f"  ✅ All items stable (no crash risks detected)")
+        CLIRenderer.display_alchemy_summary(profitable_items, calculator.nature_rune_cost, crash_alerts)
 
 
 def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
@@ -321,114 +205,131 @@ def run_flipping_analysis(calculator, limit: int = 10, min_margin: int = 200,
 
     flips = flips[:limit]
 
-    display_flip_results(flips)
+    CLIRenderer.display_flip_results(flips)
 
     if show_alerts and flips:
-        print("\n" + "=" * 70)
-        print("MARKET TREND & CRASH ALERTS")
-        print("=" * 70)
-
         flipping_alerts = calculator.get_flipping_alerts(
             min_margin=alert_min_margin,
             min_volume=alert_min_volume
         )
-
         flip_item_ids = {flip['id'] for flip in flips}
-        relevant_alerts = [alert for alert in flipping_alerts
-                        if alert.item_id in flip_item_ids]
-
-        if relevant_alerts:
-            print(f"\n🚨 ACTIVE ALERTS ({len(relevant_alerts)} items):")
-            print("-" * 70)
-
-            for alert in relevant_alerts:
-                status_emoji = {
-                    'crashing': '🔴',
-                    'crash_risk': '🟡',
-                    'surging': '🟢',
-                    'surge_risk': '🟠'
-                }.get(alert.status, '⚪')
-
-                recommendation_emoji = {
-                    'avoid': '❌',
-                    'caution': '⚠️',
-                    'opportunity': '💰',
-                    'safe': '✅'
-                }.get(alert.recommendation, '❓')
-
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
-                    f"Status: {alert.status:<12} | "
-                    f"Price Δ: {alert.price_change_percent:>6.1f}% | "
-                    f"Vol: {alert.high_volume:>4}/{alert.low_volume:<4} | "
-                    f"{recommendation_emoji} {alert.recommendation.upper()}")
-        else:
-            print("\n✅ No significant alerts for your current flipping opportunities")
-            print("All items appear stable based on recent 5-minute data")
-
-        other_alerts = [alert for alert in flipping_alerts
-                    if alert.item_id not in flip_item_ids]
-
-        if other_alerts:
-            print(f"\n📊 OTHER MARKET MOVEMENTS ({len(other_alerts[:10])} of {len(other_alerts)}):")
-            print("-" * 70)
-
-            for alert in other_alerts[:10]:
-                status_emoji = {
-                    'crashing': '🔴',
-                    'crash_risk': '🟡',
-                    'surging': '🟢',
-                    'surge_risk': '🟠'
-                }.get(alert.status, '⚪')
-
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
-                    f"Status: {alert.status:<12} | "
-                    f"Price Δ: {alert.price_change_percent:>6.1f}% | "
-                    f"Margin: {alert.margin:>8,.0f}gp")
+        CLIRenderer.display_flipping_trend_alerts(flipping_alerts, flip_item_ids)
 
     if save_csv_file:
         save_to_csv(flips, "enhanced_flipping_opportunities.csv")
 
     if flips:
-        total_flips = len(flips)
-        avg_margin = sum(flip['margin'] for flip in flips) / total_flips
-        avg_margin_percent = sum(flip['margin_percent'] for flip in flips) / total_flips
-        avg_volume = sum(flip['volume'] for flip in flips) / total_flips
-        avg_score = sum(flip['score'] for flip in flips) / total_flips
-
-        high_risk = len([f for f in flips if f.get('risk_level', 0) >= 3])
-        medium_risk = len([f for f in flips if f.get('risk_level', 0) == 2])
-        low_risk = len([f for f in flips if f.get('risk_level', 0) == 1])
-        clean = len([f for f in flips if f.get('risk_level', 0) == 0])
-
-        print(f"\n" + "=" * 70)
-        print("ENHANCED SUMMARY")
-        print("=" * 70)
-        print(f"Total flipping opportunities found: {total_flips}")
-        print(f"Average margin: {avg_margin:,.0f} gp ({avg_margin_percent:.1f}%)")
-        print(f"Average volume: {avg_volume:,.0f}")
-        print(f"Average flip score: {avg_score:.1f}/100")
-        print(f"\nRisk Distribution:")
-        print(f"  🚨 High Risk: {high_risk}")
-        print(f"  ⚠️ Medium Risk: {medium_risk}")
-        print(f"  ⚡ Low Risk: {low_risk}")
-        print(f"  ✅ Clean: {clean}")
-
+        flipping_alerts = None
         if show_alerts:
             flipping_alerts = calculator.get_flipping_alerts(alert_min_margin, alert_min_volume)
-            flip_item_ids = {flip['id'] for flip in flips}
-            relevant_alerts = [alert for alert in flipping_alerts
-                            if alert.item_id in flip_item_ids]
+        CLIRenderer.display_flipping_summary(flips, flipping_alerts)
 
-            alert_counts = {}
-            for alert in relevant_alerts:
-                status = alert.status
-                alert_counts[status] = alert_counts.get(status, 0) + 1
 
-            print(f"\nAlert Summary for Your Items:")
-            if alert_counts:
-                for status, count in alert_counts.items():
-                    emoji = {'crashing': '🔴', 'crash_risk': '🟡',
-                            'surging': '🟢', 'surge_risk': '🟠'}.get(status, '⚪')
-                    print(f"  {emoji} {status.replace('_', ' ').title()}: {count}")
-            else:
-                print(f"  ✅ All items stable (no alerts)")
+def run_market_monitor():
+    """
+    Standalone CLI workflow for market monitoring.
+
+    Creates calculator and scheduler, refreshes data, retrieves MarketEvents,
+    and displays alerts through CLI renderer.
+
+    This is a standalone frontend that consumes the MarketEvent pipeline
+    without requiring Discord.
+    """
+    print("=" * 70)
+    print("OSRS Market Monitor - Standalone CLI")
+    print("=" * 70)
+    print()
+
+    # Create calculator instance
+    logger.info("Initializing market calculator...")
+    calculator = OSRSAlchemyFlippingCalculator()
+
+    # Create scheduler instance
+    logger.info("Initializing data scheduler...")
+    scheduler = DataScheduler(calculator)
+
+    # Refresh all market data
+    print("Refreshing market data...")
+    print()
+
+    if not scheduler.refresh_all(force=True):
+        print("[ERROR] Failed to refresh critical market data")
+        return
+
+    # Provide feedback on what was loaded
+    if calculator.item_mapping:
+        print(f"[OK] Item mapping loaded ({len(calculator.item_mapping)} items)")
+
+    if calculator.current_prices:
+        print(f"[OK] Current prices loaded ({len(calculator.current_prices)} items)")
+
+    if calculator.volume_data:
+        print(f"[OK] Volume data loaded ({len(calculator.volume_data)} items)")
+
+    if calculator.five_min_data:
+        print(f"[OK] 5-minute data loaded ({len(calculator.five_min_data)} items)")
+
+    print()
+    print("Analyzing market alerts...")
+    print()
+
+    # Retrieve crash risk alerts
+    crash_events = calculator.get_alchemy_alerts(
+        min_profit=100,
+        min_volume_imbalance=2.0
+    )
+
+    # Retrieve flipping trend alerts
+    trend_events = calculator.get_flipping_alerts(
+        min_margin=1000,
+        min_volume=20
+    )
+
+    # Display results
+    if crash_events or trend_events:
+        if crash_events:
+            print("=" * 70)
+            print("CRASH RISK ALERTS")
+            print("=" * 70)
+            print()
+            print(f"Found {len(crash_events)} items with crash risk signals")
+            print()
+
+            # Display crash alerts (pass empty set to show all)
+            CLIRenderer.display_alchemy_crash_alerts(crash_events, set())
+            print()
+
+        if trend_events:
+            print("=" * 70)
+            print("MARKET TREND ALERTS")
+            print("=" * 70)
+            print()
+            print(f"Found {len(trend_events)} items with significant market movements")
+            print()
+
+            # Display trend alerts (pass empty set to show all)
+            CLIRenderer.display_flipping_trend_alerts(trend_events, set())
+            print()
+    else:
+        print("=" * 70)
+        print("No active market alerts detected")
+        print("=" * 70)
+        print()
+        print("Market conditions appear stable.")
+        print("No significant crash risks or trend movements found.")
+        print()
+
+    print("=" * 70)
+    print("Market analysis complete")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    """
+    Entry point for standalone CLI monitor execution.
+
+    Run with: python -m cli.main
+    """
+    run_market_monitor_loop(
+        interval_seconds=15 # Set to 15 seconds for testing; adjust as needed for production
+    )

@@ -98,7 +98,10 @@ def get_alchemy_crash_alerts(
                 recommendation=crash_analysis.get(
                     "recommendation",
                     "unknown"
-                )
+                ),
+                severity_score=crash_analysis.get("severity_score", 0),
+                hourly_volume=crash_analysis.get("hourly_volume", 0),
+                volume_spike=crash_analysis.get("volume_spike", False)
             )
 
             alerts.append(event)

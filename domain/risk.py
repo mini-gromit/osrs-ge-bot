@@ -132,6 +132,7 @@ def analyze_alchemy_crash_risk(item_id: int, five_min_data: Dict, volume_data: D
         'hourly_volume': 0,
         'volume_ratio': 0,
         'volume_spike': False,
+        'severity_score': 0,
         'alert_percent': 0,
         'recommendation': 'safe'
     }
@@ -180,6 +181,8 @@ def analyze_alchemy_crash_risk(item_id: int, five_min_data: Dict, volume_data: D
         if result['volume_spike']:
             crash_score += 15
 
+        result['severity_score'] = crash_score
+
         if crash_score >= 35:
             result['status'] = 'crashing'
             result['recommendation'] = 'buy low'
@@ -216,6 +219,7 @@ def analyze_flipping_trend(item_id: int, current_prices: Dict, five_min_data: Di
         'low_volume': 0,
         'hourly_volume': 0,
         'volume_spike': False,
+        'severity_score': 0,
         'price_change_percent': 0,
         'recommendation': 'safe'
     }
@@ -273,6 +277,8 @@ def analyze_flipping_trend(item_id: int, current_prices: Dict, five_min_data: Di
                 crash_score += 20
             if result['volume_spike'] and price_change > 1:
                 surge_score += 10
+
+            result['severity_score'] = max(crash_score, surge_score)
 
             if crash_score >= 35:
                 result['status'] = 'crashing'

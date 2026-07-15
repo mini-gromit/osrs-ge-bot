@@ -18,6 +18,59 @@ class OSRSAPIClient:
 
         self.headers = {'User-Agent': user_agent}
 
+        # HTTP cache for ETag and Last-Modified support
+        self._cache: Dict[str, Dict] = {}
+
+    def _get_with_cache(self, url: str, params: Optional[Dict] = None) -> Optional[requests.Response]:
+        """
+        Perform GET request with HTTP caching support.
+
+        Uses ETag/If-None-Match and Last-Modified/If-Modified-Since headers
+        to avoid redundant data transfers when content hasn't changed.
+
+        Args:
+            url: The URL to fetch
+            params: Optional query parameters
+
+        Returns:
+            Response object, or None if request fails
+        """
+        cache_key = url + str(params) if params else url
+        headers = self.headers.copy()
+
+        # Add conditional headers if we have cached data
+        if cache_key in self._cache:
+            cached = self._cache[cache_key]
+            if 'etag' in cached:
+                headers['If-None-Match'] = cached['etag']
+            if 'last_modified' in cached:
+                headers['If-Modified-Since'] = cached['last_modified']
+
+        try:
+            response = requests.get(url, headers=headers, params=params)
+
+            # Handle 304 Not Modified - return cached response
+            if response.status_code == 304:
+                if cache_key in self._cache:
+                    return self._cache[cache_key]['response']
+                # Fallback if cache missing (shouldn't happen)
+                response.raise_for_status()
+
+            response.raise_for_status()
+
+            # Store response and caching headers
+            cache_entry = {'response': response}
+            if 'ETag' in response.headers:
+                cache_entry['etag'] = response.headers['ETag']
+            if 'Last-Modified' in response.headers:
+                cache_entry['last_modified'] = response.headers['Last-Modified']
+
+            self._cache[cache_key] = cache_entry
+            return response
+
+        except requests.RequestException:
+            return None
+
     def fetch_item_mapping(self) -> Optional[List[Dict]]:
         """
         Fetch item mapping data including high alchemy values.
@@ -25,12 +78,10 @@ class OSRSAPIClient:
         Returns:
             List of item dictionaries, or None if request fails
         """
-        try:
-            response = requests.get(self.mapping_url, headers=self.headers)
-            response.raise_for_status()
+        response = self._get_with_cache(self.mapping_url)
+        if response:
             return response.json()
-        except requests.RequestException:
-            return None
+        return None
 
     def fetch_volume_data(self) -> Optional[Dict]:
         """
@@ -39,12 +90,10 @@ class OSRSAPIClient:
         Returns:
             Dictionary of volume data by item ID, or None if request fails
         """
-        try:
-            response = requests.get(self.hourly_prices_url, headers=self.headers)
-            response.raise_for_status()
+        response = self._get_with_cache(self.hourly_prices_url)
+        if response:
             return response.json().get('data', {})
-        except requests.RequestException:
-            return None
+        return None
 
     def fetch_current_prices(self) -> Optional[Dict]:
         """
@@ -53,12 +102,10 @@ class OSRSAPIClient:
         Returns:
             Dictionary of price data by item ID, or None if request fails
         """
-        try:
-            response = requests.get(self.latest_prices_url, headers=self.headers)
-            response.raise_for_status()
+        response = self._get_with_cache(self.latest_prices_url)
+        if response:
             return response.json().get('data', {})
-        except requests.RequestException:
-            return None
+        return None
 
     def fetch_five_minute_data(self) -> Optional[Dict]:
         """
@@ -67,12 +114,10 @@ class OSRSAPIClient:
         Returns:
             Dictionary of 5-minute price data by item ID, or None if request fails
         """
-        try:
-            response = requests.get(self.five_min_prices_url, headers=self.headers)
-            response.raise_for_status()
+        response = self._get_with_cache(self.five_min_prices_url)
+        if response:
             return response.json().get('data', {})
-        except requests.RequestException:
-            return None
+        return None
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
         """
@@ -85,10 +130,8 @@ class OSRSAPIClient:
         Returns:
             List of price data points, empty list if request fails
         """
-        try:
-            params = {"id": item_id, "timestep": timestep}
-            response = requests.get(self.timeseries_url, headers=self.headers, params=params)
-            response.raise_for_status()
+        params = {"id": item_id, "timestep": timestep}
+        response = self._get_with_cache(self.timeseries_url, params=params)
+        if response:
             return response.json().get("data", [])
-        except requests.RequestException:
-            return []
+        return []

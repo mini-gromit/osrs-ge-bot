@@ -33,6 +33,9 @@ class CrashRiskEvent(MarketEvent):
     volume_ratio: float
     alert_percent: float
     recommendation: str
+    severity_score: int
+    hourly_volume: int
+    volume_spike: bool
 
     def __init__(
         self,
@@ -47,6 +50,9 @@ class CrashRiskEvent(MarketEvent):
         volume_ratio: float,
         alert_percent: float,
         recommendation: str,
+        severity_score: int,
+        hourly_volume: int,
+        volume_spike: bool,
     ):
         super().__init__(event_type="crash_risk")
         self.name = name
@@ -60,6 +66,9 @@ class CrashRiskEvent(MarketEvent):
         self.volume_ratio = volume_ratio
         self.alert_percent = alert_percent
         self.recommendation = recommendation
+        self.severity_score = severity_score
+        self.hourly_volume = hourly_volume
+        self.volume_spike = volume_spike
 
 
 @dataclass
@@ -77,6 +86,9 @@ class FlippingTrendEvent(MarketEvent):
     high_volume: int
     low_volume: int
     recommendation: str
+    severity_score: int
+    hourly_volume: int
+    volume_spike: bool
 
     def __init__(
         self,
@@ -90,6 +102,9 @@ class FlippingTrendEvent(MarketEvent):
         high_volume: int,
         low_volume: int,
         recommendation: str,
+        severity_score: int,
+        hourly_volume: int,
+        volume_spike: bool,
     ):
         super().__init__(event_type="flipping_trend")
         self.name = name
@@ -102,3 +117,6 @@ class FlippingTrendEvent(MarketEvent):
         self.high_volume = high_volume
         self.low_volume = low_volume
         self.recommendation = recommendation
+        self.severity_score = severity_score
+        self.hourly_volume = hourly_volume
+        self.volume_spike = volume_spike

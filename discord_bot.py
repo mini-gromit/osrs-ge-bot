@@ -14,6 +14,8 @@ from engine import OSRSAlchemyFlippingCalculator
 from bot.config import ChannelConfig, ConfigManager
 from bot.notifications import UserNotificationManager
 from bot.converters import FlexibleChannelConverter
+from renderers import DiscordRenderer
+from scheduler import DataScheduler
 import config
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class OSRSAlchemyBot(commands.Bot):
         )
 
         self.calculator = OSRSAlchemyFlippingCalculator()
+        self.scheduler = DataScheduler(self.calculator)
         self.config_manager = ConfigManager()
         self.notification_manager = UserNotificationManager()
 
@@ -182,21 +185,6 @@ class OSRSAlchemyBot(commands.Bot):
 
         self.config_manager.save_config(self.channel_config)
 
-    def get_item_ge_tracker_url(self, item_id=None, item_name=None):
-        if item_id:
-            return f"https://www.ge-tracker.com/item/{item_id}"
-
-        if item_name:
-            slug = (
-                item_name.lower()
-                .replace("'", "-")
-                .replace(" ", "-")
-                .replace("&", "and")
-            )
-            slug = re.sub(r'[^a-z0-9\-]', '', slug)
-            return f"https://www.ge-tracker.com/item/{slug}"
-
-        return None
 
     def merge_alchemy_items(self, message_type, new_items):
         current_time = time.time()
@@ -232,29 +220,9 @@ class OSRSAlchemyBot(commands.Bot):
     async def fetch_and_analyze(self):
         logger.info("Fetching data for analysis...")
 
-        current_time = time.time()
-
-        if (
-            not hasattr(self, '_last_mapping_fetch')
-            or current_time - self._last_mapping_fetch > 3600
-        ):
-            if not self.calculator.fetch_item_mapping():
-                return None, None, None, None
-
-            self._last_mapping_fetch = current_time
-
-        if not self.calculator.fetch_current_prices():
+        # Use scheduler to refresh data based on configured intervals
+        if not self.scheduler.refresh_all():
             return None, None, None, None
-
-        try:
-            self.calculator.fetch_volume_data()
-        except Exception as e:
-            logger.warning(f"Volume error: {e}")
-
-        try:
-            self.calculator.fetch_five_minute_data()
-        except Exception as e:
-            logger.warning(f"5m error: {e}")
 
         logger.info(
             f"Filtering: "
@@ -308,41 +276,6 @@ class OSRSAlchemyBot(commands.Bot):
 
         return super_hot, hot_items, all_alchs, f2p_alchs
 
-    def create_embed(self, items, title, color):
-        embed = discord.Embed(
-            title=title,
-            color=color,
-            timestamp=datetime.now()
-        )
-
-        if not items:
-            embed.description = "No items found."
-            return embed
-
-        for i, item in enumerate(items[:10], 1):
-            ge_url = self.get_item_ge_tracker_url(
-                item_id=item.get('item_id'),
-                item_name=item.get('name')
-            )
-
-            member_tag = "[M]" if item.get('members') else "[F2P]"
-
-            embed.add_field(
-                name=f"{i}. {member_tag} {item['name']}",
-                value=(
-                    f"[GE-Tracker]({ge_url})\n"
-                    f"Profit: {item['profit']:,} gp\n"
-                    f"Buy: {item['buy_price']:,} gp\n"
-                    f"Alch: {item['high_alch_value']:,} gp\n"
-                    f"ROI: {item['roi_percent']:.1f}%\n"
-                    f"Current Profit: {item['profit']:,} gp\n"
-                    f"5m Max Seen: "
-                    f"{item.get('rolling_max_profit', item['profit']):,} gp"
-                ),
-                inline=True
-            )
-
-        return embed
 
     async def get_or_create_persistent_message(
         self,
@@ -410,21 +343,7 @@ class OSRSAlchemyBot(commands.Bot):
             if not subscribers:
                 continue
 
-            embed = discord.Embed(
-                title=title,
-                color=discord.Color.red(),
-                timestamp=datetime.now()
-            )
-
-            for item in items[:5]:
-                embed.add_field(
-                    name=item['name'],
-                    value=(
-                        f"Profit: {item['profit']:,} gp\n"
-                        f"ROI: {item['roi_percent']:.1f}%"
-                    ),
-                    inline=False
-                )
+            embed = DiscordRenderer.create_notification_embed(items, title)
 
             for uid in subscribers:
                 try:
@@ -433,6 +352,63 @@ class OSRSAlchemyBot(commands.Bot):
                         await user.send(embed=embed)
                 except Exception:
                     pass
+
+    async def send_market_event_alerts(self):
+        """
+        Fetch and send MarketEvent alerts to configured alert channels.
+
+        Handles CrashRiskEvent and FlippingTrendEvent alerts.
+        """
+        if not self.channel_config:
+            return
+
+        # Fetch crash risk alerts if channel configured
+        if self.channel_config.crash_risk_alerts:
+            try:
+                crash_alerts = self.calculator.get_alchemy_alerts(
+                    min_profit=100,
+                    min_volume_imbalance=2.0
+                )
+
+                if crash_alerts:
+                    embed = DiscordRenderer.create_crash_risk_alert_embed(
+                        crash_alerts,
+                        "🚨 Alchemy Crash Risk Alerts"
+                    )
+
+                    await self.get_or_create_persistent_message(
+                        self.channel_config.crash_risk_alerts,
+                        self.channel_config.crash_risk_message_id,
+                        embed,
+                        "crash_risk"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error sending crash risk alerts: {e}")
+
+        # Fetch flipping trend alerts if channel configured
+        if self.channel_config.flipping_trend_alerts:
+            try:
+                flipping_alerts = self.calculator.get_flipping_alerts(
+                    min_margin=1000,
+                    min_volume=20
+                )
+
+                if flipping_alerts:
+                    embed = DiscordRenderer.create_flipping_trend_alert_embed(
+                        flipping_alerts,
+                        "📊 Flipping Market Trend Alerts"
+                    )
+
+                    await self.get_or_create_persistent_message(
+                        self.channel_config.flipping_trend_alerts,
+                        self.channel_config.flipping_trend_message_id,
+                        embed,
+                        "flipping_trend"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error sending flipping trend alerts: {e}")
 
     async def send_updates_with_links(
         self,
@@ -446,7 +422,7 @@ class OSRSAlchemyBot(commands.Bot):
 
         if super_hot:
             super_hot = self.merge_alchemy_items('super_hot', super_hot)
-            embed = self.create_embed(
+            embed = DiscordRenderer.create_alchemy_embed(
                 super_hot,
                 f"🔥 SUPER HOT ALCHEMY (>{self.super_hot_min_profit:,}gp)",
                 discord.Color.red()
@@ -460,7 +436,7 @@ class OSRSAlchemyBot(commands.Bot):
 
         if hot_items:
             hot_items = self.merge_alchemy_items('hot_items', hot_items)
-            embed = self.create_embed(
+            embed = DiscordRenderer.create_alchemy_embed(
                 hot_items,
                 f"🌟 HOT ITEMS "
                 f"({self.hot_items_min_profit:,}-"
@@ -476,7 +452,7 @@ class OSRSAlchemyBot(commands.Bot):
 
         if all_alchs and self.channel_config.all_alchs:
             all_alchs = self.merge_alchemy_items('all_alchs', all_alchs)
-            embed = self.create_embed(
+            embed = DiscordRenderer.create_alchemy_embed(
                 all_alchs,
                 f"🧪 ALL ALCHS (profit >{self.all_alchs_min_profit:,}gp)",
                 discord.Color.purple()
@@ -490,7 +466,7 @@ class OSRSAlchemyBot(commands.Bot):
 
         if f2p_alchs and self.channel_config.f2p_alchs:
             f2p_alchs = self.merge_alchemy_items('f2p_alchs', f2p_alchs)
-            embed = self.create_embed(
+            embed = DiscordRenderer.create_alchemy_embed(
                 f2p_alchs,
                 f"🆓 F2P ALCHS (profit >{self.f2p_alchs_min_profit:,}gp)",
                 discord.Color.green()
@@ -505,6 +481,9 @@ class OSRSAlchemyBot(commands.Bot):
         await self.send_personal_notifications(
             super_hot, hot_items, all_alchs, f2p_alchs
         )
+
+        # Send MarketEvent alerts to dedicated alert channels
+        await self.send_market_event_alerts()
 
         logger.info(
             f"Update complete at "
@@ -575,6 +554,8 @@ async def setup_channels(
     welcome_channel: Optional[FlexibleChannelConverter] = None,
     all_alchs_channel: Optional[FlexibleChannelConverter] = None,
     f2p_alchs_channel: Optional[FlexibleChannelConverter] = None,
+    crash_risk_channel: Optional[FlexibleChannelConverter] = None,
+    flipping_trend_channel: Optional[FlexibleChannelConverter] = None,
 ):
     bot = ctx.bot
 
@@ -584,6 +565,8 @@ async def setup_channels(
         welcome_channel=welcome_channel.id if welcome_channel else None,
         all_alchs=all_alchs_channel.id if all_alchs_channel else None,
         f2p_alchs=f2p_alchs_channel.id if f2p_alchs_channel else None,
+        crash_risk_alerts=crash_risk_channel.id if crash_risk_channel else None,
+        flipping_trend_alerts=flipping_trend_channel.id if flipping_trend_channel else None,
     )
 
     await bot.save_channel_config()
@@ -599,6 +582,10 @@ async def setup_channels(
         lines.append(f"🧪 All Alchs  → {all_alchs_channel.mention}")
     if f2p_alchs_channel:
         lines.append(f"🆓 F2P Alchs  → {f2p_alchs_channel.mention}")
+    if crash_risk_channel:
+        lines.append(f"🚨 Crash Risk → {crash_risk_channel.mention}")
+    if flipping_trend_channel:
+        lines.append(f"📊 Flip Trends → {flipping_trend_channel.mention}")
 
     await ctx.send("\n".join(lines))
     await bot.start_monitoring()
@@ -616,10 +603,18 @@ async def setup_help(ctx):
             "• Click the channel name so Discord auto-inserts a mention\n"
             "• Type the name with or without `#`  e.g. `super-hot`\n"
             "• Paste the raw channel ID  e.g. `1234567890`\n\n"
+            "**Channel order:**\n"
+            "1. Super Hot (required)\n"
+            "2. Hot Items (required)\n"
+            "3. Welcome (optional)\n"
+            "4. All Alchs (optional)\n"
+            "5. F2P Alchs (optional)\n"
+            "6. Crash Risk Alerts (optional)\n"
+            "7. Flipping Trend Alerts (optional)\n\n"
             "**Examples:**\n"
             "`!setup #super-hot #hot-items`\n"
             "`!setup #super-hot #hot-items #welcome`\n"
-            "`!setup #super-hot #hot-items #welcome #all-alchs #f2p-alchs`"
+            "`!setup #super-hot #hot-items #welcome #all-alchs #f2p-alchs #crash-alerts #flip-alerts`"
         )
     )
     await ctx.send(embed=embed)
@@ -689,6 +684,10 @@ async def status_cmd(ctx):
             lines.append(f"🧪 All Alchs: <#{bot.channel_config.all_alchs}>")
         if bot.channel_config.f2p_alchs:
             lines.append(f"🆓 F2P Alchs: <#{bot.channel_config.f2p_alchs}>")
+        if bot.channel_config.crash_risk_alerts:
+            lines.append(f"🚨 Crash Risk: <#{bot.channel_config.crash_risk_alerts}>")
+        if bot.channel_config.flipping_trend_alerts:
+            lines.append(f"📊 Flip Trends: <#{bot.channel_config.flipping_trend_alerts}>")
         embed.add_field(
             name="Channels",
             value="\n".join(lines),

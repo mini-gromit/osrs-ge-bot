@@ -28,7 +28,7 @@ class OSRSAlchemyFlippingCalculator:
         self.flipping_history_periods = config.FLIPPING_HISTORY_PERIODS
 
         self.non_alchemizable_keywords = config.NON_ALCHEMIZABLE_KEYWORDS
-        
+
     def is_alchemizable(self, item_data: Dict) -> bool:
         """
         Check if an item can be alchemized based on various criteria
@@ -40,7 +40,7 @@ class OSRSAlchemyFlippingCalculator:
             True if item can be alchemized, False otherwise
         """
         return alchemy.is_alchemizable(item_data, self.non_alchemizable_keywords)
-        
+
     def fetch_item_mapping(self) -> bool:
         """
         Fetch item mapping data including high alchemy values
@@ -67,7 +67,7 @@ class OSRSAlchemyFlippingCalculator:
 
         logger.info(f"Successfully fetched mapping for {len(self.item_mapping)} items")
         return True
-    
+
     def fetch_volume_data(self) -> bool:
         """
         Fetch volume data from 1-hour endpoint
@@ -88,7 +88,7 @@ class OSRSAlchemyFlippingCalculator:
 
         logger.info(f"Successfully fetched volume data for {len(self.volume_data)} items")
         return True
-    
+
     def fetch_current_prices(self) -> bool:
         """
         Fetch current Grand Exchange prices
@@ -147,7 +147,7 @@ class OSRSAlchemyFlippingCalculator:
         if not data:
             logger.warning(f"Error fetching timeseries for item {item_id}")
         return data
-    
+
     def detect_pump_and_dump(self, history_prices: List[Dict], current_high: int, current_low: int) -> tuple:
         """
         Enhanced pump and dump detection with multiple criteria
@@ -161,7 +161,7 @@ class OSRSAlchemyFlippingCalculator:
             Tuple of (is_suspicious, risk_level, reason)
         """
         return risk.detect_pump_and_dump(history_prices, current_high, current_low)
-    
+
     def calculate_alchemy_profit(self, item_id: int) -> Optional[Dict]:
         """
         Calculate high alchemy profit for a specific item
@@ -222,9 +222,9 @@ class OSRSAlchemyFlippingCalculator:
         logger.info(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
 
         return profitable_items
-    
-    def get_top_flips(self, limit: int = 10, min_margin: int = 200, min_volume: int = 20, 
-                    max_buy_price: int = None, fetch_history: bool = True, 
+
+    def get_top_flips(self, limit: int = 10, min_margin: int = 200, min_volume: int = 20,
+                    max_buy_price: int = None, fetch_history: bool = True,
                     max_margin_percent: float = 20.0, exclude_high_risk: bool = True,
                     min_score: int = 30) -> List[Dict]:
         """
@@ -234,9 +234,9 @@ class OSRSAlchemyFlippingCalculator:
         if not self.current_prices or not self.volume_data:
             logger.error("Missing price or volume data. Make sure to fetch current prices and volume data first.")
             return []
-            
+
         flips = []
-        
+
         # First pass: collect all potential flips with proper GE tax calculation
         for item_id_str, current_price_data in self.current_prices.items():
             try:
@@ -244,45 +244,45 @@ class OSRSAlchemyFlippingCalculator:
                 item = self.item_mapping.get(item_id)
                 if not item:
                     continue
-                
+
                 # Use averaged prices for flipping if available
                 price_info = self.get_flipping_prices(item_id)
                 if not price_info:
                     continue
-                    
+
                 high = price_info.get("high")
                 low = price_info.get("low")
-                
+
                 if not high or not low or high <= low:
                     continue
-                
+
                 # Get volume from hourly data
                 vol = self.volume_data.get(item_id, 0)
-                
+
                 # FIXED: Calculate margin AFTER GE tax (1% on buy, 1% on sell = ~2% total)
                 buy_price_with_tax = int(low * 1.01)  # 1% tax when buying
                 sell_price_after_tax = int(high * 0.99)  # 1% tax when selling
                 actual_margin = sell_price_after_tax - buy_price_with_tax
-                
+
                 # Calculate margin percentage based on actual costs
                 margin_percent = (actual_margin / buy_price_with_tax * 100) if buy_price_with_tax > 0 else 0
-                
+
                 # UPDATED: Apply filters using the actual margin after tax
                 if actual_margin < min_margin or vol < min_volume:
                     continue
-                    
+
                 # Filter for maximum buy price (use the taxed buy price)
                 if max_buy_price is not None and buy_price_with_tax > max_buy_price:
                     continue
-                
+
                 # Filter out items with margin percentage greater than max_margin_percent
                 if margin_percent > max_margin_percent:
                     continue
-                
+
                 # FIXED: Calculate a basic score even without history
                 # This prevents all items from having score=50
                 basic_score = 0
-                
+
                 # Basic margin score (0-20)
                 if actual_margin >= 100000:
                     basic_score += 20
@@ -296,7 +296,7 @@ class OSRSAlchemyFlippingCalculator:
                     basic_score += 5
                 else:
                     basic_score += 2
-                
+
                 # Basic volume score (0-15)
                 if vol >= 1000:
                     basic_score += 15
@@ -308,7 +308,7 @@ class OSRSAlchemyFlippingCalculator:
                     basic_score += 5
                 else:
                     basic_score += 2
-                
+
                 # Basic ROI score (0-10) - capped to avoid pump/dump rewards
                 roi_capped = min(margin_percent, 15)  # Cap at 15%
                 if roi_capped >= 10:
@@ -319,7 +319,7 @@ class OSRSAlchemyFlippingCalculator:
                     basic_score += 4
                 else:
                     basic_score += 1
-                
+
                 flips.append({
                     "name": item["name"],
                     "id": item_id,
@@ -337,13 +337,13 @@ class OSRSAlchemyFlippingCalculator:
                     "risk_level": 0,
                     "risk_info": "Not analyzed"
                 })
-                
+
             except Exception as e:
                 continue
-        
+
         # Sort by score first, then margin
         flips.sort(key=lambda x: (x['score'], x['margin']), reverse=True)
-        
+
         # FIXED: Limit the number of items we analyze with history
         analysis_limit = min(limit * 2, 15)  # Never more than 15 items for history analysis
         top_candidates = flips[:analysis_limit]
@@ -354,36 +354,36 @@ class OSRSAlchemyFlippingCalculator:
         if fetch_history and top_candidates:
             logger.info(f"Analyzing price history for top {len(top_candidates)} candidates...")
             analyzed_flips = []
-            
+
             for i, flip in enumerate(top_candidates):
                 try:
                     logger.info(f"Fetching history for {flip['name']} ({i+1}/{len(top_candidates)})")
                     ts_data = self.fetch_timeseries(flip['id'], "24h")
-                    
+
                     # FIXED: Use the original prices for score calculation (the method handles GE tax internally)
                     score, history_summary, risk_info = self.calculate_flip_score(
                         flip['sell_price'],  # Original high price
                         flip['buy_price'],   # Original low price
-                        flip['volume'], 
+                        flip['volume'],
                         flip['margin'],      # Already tax-adjusted margin
                         flip['limit'],
                         ts_data,
                         flip['score']  # Pass the basic score to build upon
                     )
-                    
+
                     # FIXED: Update the score properly
                     flip['score'] = score
                     flip['history'] = history_summary
                     flip['risk_level'] = risk_info[1]
                     flip['risk_info'] = risk_info[2]
-                    
+
                     # Apply filters
                     if exclude_high_risk and risk_info[0] and risk_info[1] >= 3:
                         continue  # Skip high-risk items
-                    
+
                     if score >= min_score:
                         analyzed_flips.append(flip)
-                    
+
                     time.sleep(0.1)  # Be kind to the API
                 except Exception as e:
                     logger.warning(f"Error analyzing {flip['name']}: {e}")
@@ -391,7 +391,7 @@ class OSRSAlchemyFlippingCalculator:
                     if flip['score'] >= min_score:
                         analyzed_flips.append(flip)
                     continue
-            
+
             # Sort by score after analysis
             analyzed_flips.sort(key=lambda x: (x['score'], x['margin']), reverse=True)
             logger.info(f"History analysis complete: {len(analyzed_flips)} items passed all filters")
@@ -426,28 +426,28 @@ class OSRSAlchemyFlippingCalculator:
         if not self.current_prices:
             logger.error("No current prices available. Fetch current prices first.")
             return False
-            
+
         # FIXED: If no specific items provided, intelligently select the best candidates
         if item_ids is None:
             candidate_items = []
-            
+
             # Pre-filter items to only the most promising candidates
             for item_id_str, price_data in self.current_prices.items():
                 item_id = int(item_id_str)
-                
+
                 # Only consider items with decent prices and volume
                 high = price_data.get('high')
                 low = price_data.get('low')
                 volume = self.volume_data.get(item_id, 0)
-                
-                if (high and low and high > low and 
+
+                if (high and low and high > low and
                     volume >= 10 and  # Minimum volume threshold
                     low >= 1000 and  # Don't bother with very cheap items
                     high <= 50000000):  # Skip extremely expensive items
-                    
+
                     margin = high - low
                     margin_percent = (margin / low) * 100
-                    
+
                     # Only include items with reasonable margins
                     if 1000 <= margin <= 5000000 and margin_percent < 25:  # Reasonable bounds
                         candidate_items.append({
@@ -456,7 +456,7 @@ class OSRSAlchemyFlippingCalculator:
                             'volume': volume,
                             'margin_percent': margin_percent
                         })
-            
+
             # Sort by a combination of margin and volume, take top candidates
             candidate_items.sort(key=lambda x: x['margin'] * (x['volume'] ** 0.5), reverse=True)
 
@@ -472,10 +472,10 @@ class OSRSAlchemyFlippingCalculator:
             item_ids = item_ids[:100]
 
         logger.info(f"Fetching flipping average prices for {len(item_ids)} items using {timestep} timestep...")
-        
+
         successful_fetches = 0
         failed_fetches = 0
-        
+
         for i, item_id in enumerate(item_ids):
             try:
                 # Progress indicator every 10 items instead of 25
@@ -484,20 +484,20 @@ class OSRSAlchemyFlippingCalculator:
 
                 # Fetch timeseries data
                 ts_data = self.fetch_timeseries(item_id, timestep)
-                
+
                 if not ts_data or len(ts_data) < 5:  # Need at least 5 data points
                     failed_fetches += 1
                     continue
-                
+
                 # Use recent data for averaging (last N periods)
                 recent_data = ts_data[-min(len(ts_data), self.flipping_history_periods):]
-                
+
                 highs = [entry.get('avgHighPrice') for entry in recent_data if entry.get('avgHighPrice')]
                 lows = [entry.get('avgLowPrice') for entry in recent_data if entry.get('avgLowPrice')]
-                volumes = [entry.get('highPriceVolume', 0) + entry.get('lowPriceVolume', 0) 
-                        for entry in recent_data 
+                volumes = [entry.get('highPriceVolume', 0) + entry.get('lowPriceVolume', 0)
+                        for entry in recent_data
                         if entry.get('highPriceVolume') is not None and entry.get('lowPriceVolume') is not None]
-                
+
                 if len(highs) >= 3 and len(lows) >= 3:  # Need at least 3 valid data points
                     # For flipping, we want more conservative averages to avoid pump/dump traps
                     # Use median-weighted average (60% median + 40% mean) for stability
@@ -505,17 +505,17 @@ class OSRSAlchemyFlippingCalculator:
                     mean_low = statistics.mean(lows)
                     median_high = statistics.median(highs)
                     median_low = statistics.median(lows)
-                    
+
                     # Conservative weighted average favoring median for stability
                     avg_high = int(median_high * 0.6 + mean_high * 0.4)
                     avg_low = int(median_low * 0.6 + mean_low * 0.4)
-                    
+
                     # Calculate stability metrics
                     high_std = statistics.stdev(highs) if len(highs) > 1 else 0
                     low_std = statistics.stdev(lows) if len(lows) > 1 else 0
                     high_cv = (high_std / mean_high * 100) if mean_high > 0 else 100
                     low_cv = (low_std / mean_low * 100) if mean_low > 0 else 100
-                    
+
                     self.flipping_average_prices[item_id] = {
                         'high': avg_high,
                         'low': avg_low,
@@ -531,7 +531,7 @@ class OSRSAlchemyFlippingCalculator:
                     successful_fetches += 1
                 else:
                     failed_fetches += 1
-                
+
                 # Be respectful to the API - slightly longer delay
                 time.sleep(0.1)  # 100ms delay between requests
 
@@ -546,10 +546,10 @@ class OSRSAlchemyFlippingCalculator:
     def get_flipping_prices(self, item_id: int) -> Dict:
         """
         Get prices for flipping - either averaged or realtime based on settings
-        
+
         Args:
             item_id: Item ID to get prices for
-            
+
         Returns:
             Dictionary with 'high', 'low', and price source info
         """
@@ -632,60 +632,3 @@ class OSRSAlchemyFlippingCalculator:
             List of FlippingTrendEvent objects
         """
         return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume)
-
-if __name__ == "__main__":
-    import logging
-    from cli import main as cli
-
-    # Configure logging
-    logging.basicConfig(
-        format=config.LOG_FORMAT,
-        datefmt=config.LOG_DATE_FORMAT,
-        level=getattr(logging, config.LOG_LEVEL)
-    )
-
-    calculator = OSRSAlchemyFlippingCalculator()
-
-    print("=" * 70)
-    print("ENHANCED FLIPPING ANALYSIS WITH TREND ALERTS")
-    print("=" * 70)
-
-    cli.run_flipping_analysis(
-        calculator,
-        limit=15,
-        min_margin=1000,
-        min_volume=50,
-        members_only=None,
-        max_buy_price=20000000,
-        max_margin_percent=15.0,
-        exclude_high_risk=True,
-        min_score=40,
-        save_csv_file=True,
-        fetch_history=True,
-        use_averaged_prices=True,
-        show_alerts=True,
-        alert_min_margin=1000,
-        alert_min_volume=20
-    )
-
-    time.sleep(2)
-
-    print("\n" + "=" * 70)
-    print("ENHANCED ALCHEMY ANALYSIS WITH CRASH DETECTION")
-    print("=" * 70)
-
-    cli.run_alchemy_analysis(
-        calculator,
-        min_profit=200,
-        max_items=100,
-        members_only=None,
-        save_csv_file=True,
-        max_buy_price=10000000,
-        min_limit=None,
-        min_volume=20,
-        max_roi=None,
-        show_non_alchemizable_sample=False,
-        show_crash_alerts=True,
-        alert_min_profit=100,
-        alert_min_imbalance=2.0
-    )
