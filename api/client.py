@@ -12,6 +12,7 @@ class OSRSAPIClient:
         self.hourly_prices_url = f"{self.base_url}/1h"
         self.five_min_prices_url = f"{self.base_url}/5m"
         self.timeseries_url = f"{self.base_url}/timeseries"
+        self.exchange_base_url = "https://api.weirdgloop.org/exchange/history/osrs"
 
         if user_agent is None:
             user_agent = 'OSRS_Alchemy_Calculator - Educational/Personal Use - Python Script - @lovvu0173 on Discord.'
@@ -134,4 +135,55 @@ class OSRSAPIClient:
         response = self._get_with_cache(self.timeseries_url, params=params)
         if response:
             return response.json().get("data", [])
+        return []
+
+    def fetch_timestamp_snapshot(self, timestamp: int, resolution: str = "1h") -> Optional[Dict]:
+        """
+        Fetch market snapshot at a specific historical timestamp.
+
+        Args:
+            timestamp: Unix timestamp
+            resolution: '5m' or '1h'
+
+        Returns:
+            Dictionary of item_id -> price/volume data, or None if request fails
+        """
+        url = f"{self.base_url}/{resolution}"
+        params = {"timestamp": timestamp}
+        response = self._get_with_cache(url, params=params)
+        if response:
+            return response.json().get('data', {})
+        return None
+
+    def fetch_exchange_history(self, item_id: int, endpoint: str = "all") -> List[Dict]:
+        """
+        Fetch historical data from Weird Gloop Exchange API.
+
+        Provides deeper history than timeseries (back to March 2021) but
+        lacks volume data for early periods.
+
+        Args:
+            item_id: Item ID to fetch
+            endpoint: 'all', 'last90d', or 'latest'
+
+        Returns:
+            List of historical price data points, empty list if request fails
+        """
+        url = f"{self.exchange_base_url}/{endpoint}"
+        params = {"id": item_id}
+        response = self._get_with_cache(url, params=params)
+        if response:
+            data = response.json()
+            # Exchange API wraps data in object with item_id as key
+            # Extract the actual data array/object
+            if isinstance(data, dict):
+                item_key = str(item_id)
+                if item_key in data:
+                    item_data = data[item_key]
+                    # Return as list regardless of endpoint
+                    if isinstance(item_data, list):
+                        return item_data
+                    else:
+                        return [item_data]
+            return []
         return []
