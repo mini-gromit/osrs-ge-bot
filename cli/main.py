@@ -235,93 +235,32 @@ def run_market_monitor():
     This is a standalone frontend that consumes the MarketEvent pipeline
     without requiring Discord.
     """
-    print("=" * 70)
-    print("OSRS Market Monitor - Standalone CLI")
-    print("=" * 70)
-    print()
-
-    # Create calculator instance
-    logger.info("Initializing market calculator...")
+    # Create calculator and scheduler instances
     calculator = OSRSAlchemyFlippingCalculator()
-
-    # Create scheduler instance
-    logger.info("Initializing data scheduler...")
     scheduler = DataScheduler(calculator)
 
-    # Refresh all market data
-    print("Refreshing market data...")
-    print()
-
+    # Refresh all market data (verbose logs now at DEBUG level)
     if not scheduler.refresh_all(force=True):
         print("[ERROR] Failed to refresh critical market data")
         return
 
-    # Provide feedback on what was loaded
-    if calculator.item_mapping:
-        print(f"[OK] Item mapping loaded ({len(calculator.item_mapping)} items)")
-
-    if calculator.current_prices:
-        print(f"[OK] Current prices loaded ({len(calculator.current_prices)} items)")
-
-    if calculator.volume_data:
-        print(f"[OK] Volume data loaded ({len(calculator.volume_data)} items)")
-
-    if calculator.five_min_data:
-        print(f"[OK] 5-minute data loaded ({len(calculator.five_min_data)} items)")
-
-    print()
-    print("Analyzing market alerts...")
-    print()
-
-    # Retrieve crash risk alerts
+    # Retrieve market alerts
     crash_events = calculator.get_alchemy_alerts(
         min_profit=100,
         min_volume_imbalance=2.0
     )
 
-    # Retrieve flipping trend alerts
     trend_events = calculator.get_flipping_alerts(
         min_margin=1000,
         min_volume=20
     )
 
-    # Display results
-    if crash_events or trend_events:
-        if crash_events:
-            print("=" * 70)
-            print("CRASH RISK ALERTS")
-            print("=" * 70)
-            print()
-            print(f"Found {len(crash_events)} items with crash risk signals")
-            print()
-
-            # Display crash alerts (pass empty set to show all)
-            CLIRenderer.display_alchemy_crash_alerts(crash_events, set())
-            print()
-
-        if trend_events:
-            print("=" * 70)
-            print("MARKET TREND ALERTS")
-            print("=" * 70)
-            print()
-            print(f"Found {len(trend_events)} items with significant market movements")
-            print()
-
-            # Display trend alerts (pass empty set to show all)
-            CLIRenderer.display_flipping_trend_alerts(trend_events, set())
-            print()
-    else:
-        print("=" * 70)
-        print("No active market alerts detected")
-        print("=" * 70)
-        print()
-        print("Market conditions appear stable.")
-        print("No significant crash risks or trend movements found.")
-        print()
-
-    print("=" * 70)
-    print("Market analysis complete")
-    print("=" * 70)
+    # Display concise dashboard
+    CLIRenderer.display_market_dashboard(
+        calculator,
+        crash_events,
+        trend_events
+    )
 
 
 if __name__ == "__main__":

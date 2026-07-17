@@ -46,7 +46,7 @@ class OSRSAlchemyFlippingCalculator:
         Fetch item mapping data including high alchemy values
         Returns True if successful, False otherwise
         """
-        logger.info("Fetching item mapping data...")
+        logger.debug("Fetching item mapping data...")
         mapping_data = self.client.fetch_item_mapping()
 
         if mapping_data is None:
@@ -65,7 +65,7 @@ class OSRSAlchemyFlippingCalculator:
                 'icon': item.get('icon', '')
             }
 
-        logger.info(f"Successfully fetched mapping for {len(self.item_mapping)} items")
+        logger.debug(f"Successfully fetched mapping for {len(self.item_mapping)} items")
         return True
 
     def fetch_volume_data(self) -> bool:
@@ -73,7 +73,7 @@ class OSRSAlchemyFlippingCalculator:
         Fetch volume data from 1-hour endpoint
         Returns True if successful, False otherwise
         """
-        logger.info("Fetching volume data...")
+        logger.debug("Fetching volume data...")
         hourly_data = self.client.fetch_volume_data()
 
         if hourly_data is None:
@@ -86,7 +86,7 @@ class OSRSAlchemyFlippingCalculator:
                 total_volume = (data.get('highPriceVolume', 0) or 0) + (data.get('lowPriceVolume', 0) or 0)
                 self.volume_data[item_id] = total_volume
 
-        logger.info(f"Successfully fetched volume data for {len(self.volume_data)} items")
+        logger.debug(f"Successfully fetched volume data for {len(self.volume_data)} items")
         return True
 
     def fetch_current_prices(self) -> bool:
@@ -94,7 +94,7 @@ class OSRSAlchemyFlippingCalculator:
         Fetch current Grand Exchange prices
         Returns True if successful, False otherwise
         """
-        logger.info("Fetching current GE prices...")
+        logger.debug("Fetching current GE prices...")
         price_data = self.client.fetch_current_prices()
 
         if price_data is None:
@@ -102,7 +102,7 @@ class OSRSAlchemyFlippingCalculator:
             return False
 
         self.current_prices = price_data
-        logger.info(f"Successfully fetched prices for {len(self.current_prices)} items")
+        logger.debug(f"Successfully fetched prices for {len(self.current_prices)} items")
         return True
 
     def fetch_five_minute_data(self) -> bool:
@@ -115,7 +115,7 @@ class OSRSAlchemyFlippingCalculator:
 
         Returns True if successful, False otherwise
         """
-        logger.info("Fetching 5-minute price data for trend analysis...")
+        logger.debug("Fetching 5-minute price data for trend analysis...")
         five_min_data = self.client.fetch_five_minute_data()
 
         if five_min_data is None:
@@ -135,7 +135,7 @@ class OSRSAlchemyFlippingCalculator:
                     'lowest_low': None  # Will be populated by enrich_five_min_with_minimums if called
                 }
 
-        logger.info(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
+        logger.debug(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
         return True
 
     def enrich_five_min_with_minimums(self, item_ids: List[int], lookback_periods: int = 12) -> int:
@@ -170,7 +170,7 @@ class OSRSAlchemyFlippingCalculator:
             logger.debug(f"All {len(item_ids)} items already enriched, skipping")
             return 0
 
-        logger.info(f"Enriching {len(items_to_enrich)} items with 5m historical minimums (last {lookback_periods} periods)...")
+        logger.debug(f"Enriching {len(items_to_enrich)} items with 5m historical minimums (last {lookback_periods} periods)...")
         enriched_count = 0
 
         for item_id in items_to_enrich:
@@ -200,7 +200,7 @@ class OSRSAlchemyFlippingCalculator:
                 logger.warning(f"Error enriching item {item_id} with 5m minimums: {e}")
                 continue
 
-        logger.info(f"Successfully enriched {enriched_count}/{len(item_ids)} items with historical minimums")
+        logger.debug(f"Successfully enriched {enriched_count}/{len(item_ids)} items with historical minimums")
         return enriched_count
 
     def enrich_candidate_items_with_history(self, lookback_periods: int = 12) -> int:
@@ -229,7 +229,7 @@ class OSRSAlchemyFlippingCalculator:
             logger.warning("Cannot enrich - missing current_prices or five_min_data")
             return 0
 
-        logger.info("Identifying candidate items for historical enrichment...")
+        logger.debug("Identifying candidate items for historical enrichment...")
 
         # Engine coordinates workflow: domain layer filters profitable items
         # Use configured threshold to capture all items that frontends might display
@@ -247,10 +247,10 @@ class OSRSAlchemyFlippingCalculator:
         item_ids = list(set(item['item_id'] for item in candidate_items))
 
         if not item_ids:
-            logger.info("No candidate items found for enrichment")
+            logger.debug("No candidate items found for enrichment")
             return 0
 
-        logger.info(f"Enriching {len(item_ids)} candidate items with historical data...")
+        logger.debug(f"Enriching {len(item_ids)} candidate items with historical data...")
 
         # Delegate to existing enrichment method (which calls API layer)
         return self.enrich_five_min_with_minimums(item_ids, lookback_periods)
@@ -346,7 +346,7 @@ class OSRSAlchemyFlippingCalculator:
             min_limit, min_volume, max_roi
         )
 
-        logger.info(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
+        logger.debug(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
 
         return profitable_items
 
@@ -475,16 +475,16 @@ class OSRSAlchemyFlippingCalculator:
         analysis_limit = min(limit * 2, 15)  # Never more than 15 items for history analysis
         top_candidates = flips[:analysis_limit]
 
-        logger.info(f"Pre-filtered to {len(flips)} candidates, analyzing top {len(top_candidates)} with history")
+        logger.debug(f"Pre-filtered to {len(flips)} candidates, analyzing top {len(top_candidates)} with history")
 
         # Second pass: fetch history and calculate enhanced scores
         if fetch_history and top_candidates:
-            logger.info(f"Analyzing price history for top {len(top_candidates)} candidates...")
+            logger.debug(f"Analyzing price history for top {len(top_candidates)} candidates...")
             analyzed_flips = []
 
             for i, flip in enumerate(top_candidates):
                 try:
-                    logger.info(f"Fetching history for {flip['name']} ({i+1}/{len(top_candidates)})")
+                    logger.debug(f"Fetching history for {flip['name']} ({i+1}/{len(top_candidates)})")
                     ts_data = self.fetch_timeseries(flip['id'], "24h")
 
                     # FIXED: Use the original prices for score calculation (the method handles GE tax internally)
@@ -521,13 +521,13 @@ class OSRSAlchemyFlippingCalculator:
 
             # Sort by score after analysis
             analyzed_flips.sort(key=lambda x: (x['score'], x['margin']), reverse=True)
-            logger.info(f"History analysis complete: {len(analyzed_flips)} items passed all filters")
+            logger.debug(f"History analysis complete: {len(analyzed_flips)} items passed all filters")
             return analyzed_flips[:limit]
         else:
             for flip in flips:
                 flip['score'] = (flip['score'] / 45) * 100
             # Return without detailed analysis, but still properly scored
-            logger.info(f"Returning {len(top_candidates[:limit])} items with basic scoring")
+            logger.debug(f"Returning {len(top_candidates[:limit])} items with basic scoring")
             return top_candidates[:limit]
 
     def get_non_alchemizable_sample(self, sample_size: int = 10) -> List[Dict]:

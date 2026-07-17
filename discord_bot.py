@@ -16,6 +16,7 @@ from bot.notifications import UserNotificationManager
 from bot.converters import FlexibleChannelConverter
 from renderers import DiscordRenderer
 from scheduler import DataScheduler
+from notifications import AlertPolicy, JsonPreferenceStore
 import config
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,13 @@ class OSRSAlchemyBot(commands.Bot):
         self.scheduler = DataScheduler(self.calculator)
         self.config_manager = ConfigManager()
         self.notification_manager = UserNotificationManager()
+
+        # Initialize alert policy layer for notification filtering
+        self.preference_store = JsonPreferenceStore(
+            filename='user_preferences.json',
+            subscription_manager=self.notification_manager
+        )
+        self.alert_policy = AlertPolicy(self.preference_store)
 
         self.channel_config = None
         self.last_update = None
@@ -377,11 +385,86 @@ class OSRSAlchemyBot(commands.Bot):
                 except Exception:
                     pass
 
+    async def send_market_event_notifications(self):
+        """
+        Send MarketEvent alerts to users via DM using AlertPolicy.
+
+        Uses AlertPolicy layer to:
+        - Filter events by user severity thresholds
+        - Apply cooldowns (default 15 min per item per user)
+        - Suppress duplicates (same item/status within 5 min)
+        - Respect user notification preferences
+
+        Produces NotificationDecision objects consumed by Discord renderer.
+        """
+        try:
+            # Fetch crash risk alerts
+            crash_events = self.calculator.get_alchemy_alerts(
+                min_profit=100,
+                min_volume_imbalance=2.0
+            )
+
+            if crash_events:
+                # Filter through AlertPolicy
+                notifications = self.alert_policy.filter_events(
+                    crash_events,
+                    'crash_risk'
+                )
+
+                # Send DMs to users who should be notified
+                for notif in notifications:
+                    try:
+                        user = await self.fetch_user(notif.user_id)
+                        if user:
+                            # Render notification using event data
+                            embed = DiscordRenderer.create_crash_risk_alert_embed(
+                                [notif.event],
+                                f"{'🔴' if notif.priority == 'high' else '🟡'} Alchemy Crash Risk Alert"
+                            )
+                            await user.send(embed=embed)
+                    except Exception as e:
+                        logger.debug(f"Failed to send crash risk DM to user {notif.user_id}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Error sending crash risk notifications: {e}")
+
+        try:
+            # Fetch flipping trend alerts
+            trend_events = self.calculator.get_flipping_alerts(
+                min_margin=1000,
+                min_volume=20
+            )
+
+            if trend_events:
+                # Filter through AlertPolicy
+                notifications = self.alert_policy.filter_events(
+                    trend_events,
+                    'flipping_trend'
+                )
+
+                # Send DMs to users who should be notified
+                for notif in notifications:
+                    try:
+                        user = await self.fetch_user(notif.user_id)
+                        if user:
+                            # Render notification using event data
+                            embed = DiscordRenderer.create_flipping_trend_alert_embed(
+                                [notif.event],
+                                f"{'🔴' if notif.priority == 'high' else '🟡'} Market Trend Alert"
+                            )
+                            await user.send(embed=embed)
+                    except Exception as e:
+                        logger.debug(f"Failed to send trend DM to user {notif.user_id}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Error sending flipping trend notifications: {e}")
+
     async def send_market_event_alerts(self):
         """
         Fetch and send MarketEvent alerts to configured alert channels.
 
         Handles CrashRiskEvent and FlippingTrendEvent alerts.
+        Separate from user DM notifications (handled by send_market_event_notifications).
         """
         if not self.channel_config:
             return
@@ -508,6 +591,9 @@ class OSRSAlchemyBot(commands.Bot):
 
         # Send MarketEvent alerts to dedicated alert channels
         await self.send_market_event_alerts()
+
+        # Send MarketEvent notifications to users via DM using AlertPolicy
+        await self.send_market_event_notifications()
 
         logger.info(
             f"Update complete at "

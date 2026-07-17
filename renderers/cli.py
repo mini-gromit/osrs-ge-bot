@@ -1,4 +1,5 @@
 from typing import List, Dict
+from datetime import datetime
 from events import CrashRiskEvent, FlippingTrendEvent
 
 
@@ -9,6 +10,94 @@ class CLIRenderer:
     Handles table formatting, alert displays, and summary output.
     Consumes business/domain data and produces formatted CLI output.
     """
+
+    @staticmethod
+    def display_market_dashboard(calculator, crash_events: List[CrashRiskEvent], trend_events: List[FlippingTrendEvent]):
+        """
+        Display concise operator-facing market dashboard.
+
+        Shows refresh summary and top opportunities in a compact format.
+        Designed for terminal monitoring without verbose logging noise.
+
+        Args:
+            calculator: OSRSAlchemyFlippingCalculator instance with loaded data
+            crash_events: List of crash risk alerts
+            trend_events: List of market trend alerts
+        """
+        # Clear screen for clean dashboard view (optional)
+        print("\n" * 2)
+        print("=" * 70)
+        print("OSRS Market Engine")
+        print("=" * 70)
+        print()
+
+        # Refresh summary
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        items_scanned = len(calculator.item_mapping)
+
+        # Count profitable items (quick check with minimal filtering)
+        profitable_count = 0
+        if calculator.current_prices and calculator.item_mapping:
+            profitable_items = calculator.get_profitable_items(
+                min_profit=100,
+                max_items=500
+            )
+            profitable_count = len(profitable_items)
+
+        alert_count = len(crash_events) + len(trend_events)
+
+        # Check enrichment status
+        enriched_count = 0
+        if calculator.five_min_data:
+            enriched_count = sum(
+                1 for item_data in calculator.five_min_data.values()
+                if item_data.get('lowest_low') is not None
+            )
+        enrichment_status = f"{enriched_count}/{len(calculator.five_min_data)}" if calculator.five_min_data else "0/0"
+
+        print(f"Refresh: {timestamp}")
+        print(f"Scanned: {items_scanned:,} items | Profitable: {profitable_count} | Alerts: {alert_count}")
+        print(f"Enrichment: {enrichment_status} items enriched with historical data")
+        print()
+
+        # Top opportunities - combine crash and trend events
+        all_opportunities = []
+
+        # Add crash alerts as opportunities
+        for event in crash_events[:10]:
+            status_text = event.status.replace('_', ' ')
+            all_opportunities.append({
+                'name': event.name,
+                'profit': event.profit,
+                'roi': event.roi_percent,
+                'status': status_text,
+                'type': 'alchemy'
+            })
+
+        # Add trend alerts as opportunities
+        for event in trend_events[:10]:
+            status_text = event.status.replace('_', ' ')
+            all_opportunities.append({
+                'name': event.name,
+                'profit': event.margin,
+                'roi': event.margin_percent,
+                'status': status_text,
+                'type': 'flip'
+            })
+
+        if all_opportunities:
+            print("Top Opportunities:")
+            print("-" * 70)
+            for opp in all_opportunities[:5]:
+                # Format as one-liner
+                type_tag = "[ALCH]" if opp['type'] == 'alchemy' else "[FLIP]"
+                print(f"{opp['name']:<25} {type_tag:<7} +{opp['profit']:>5,.0f} gp  {opp['roi']:>5.0f}% ROI  {opp['status']}")
+        else:
+            print("No significant market opportunities detected.")
+            print("Market conditions appear stable.")
+
+        print()
+        print("=" * 70)
 
     @staticmethod
     def display_alchemy_results(items: List[Dict], show_count: int = 20):

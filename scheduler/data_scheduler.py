@@ -82,7 +82,7 @@ class DataScheduler:
 
         if success:
             self._last_fetch_times['item_mapping'] = time.time()
-            logger.info("Item mapping refreshed successfully")
+            logger.debug("Item mapping refreshed successfully")
         else:
             logger.warning("Failed to refresh item mapping")
 
@@ -176,7 +176,7 @@ class DataScheduler:
         Returns:
             True if all critical refreshes succeeded, False otherwise
         """
-        logger.info("Refreshing market data...")
+        logger.debug("Refreshing market data...")
 
         # Item mapping is critical - must succeed
         if not self.refresh_item_mapping(force):
