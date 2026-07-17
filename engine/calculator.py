@@ -203,6 +203,58 @@ class OSRSAlchemyFlippingCalculator:
         logger.info(f"Successfully enriched {enriched_count}/{len(item_ids)} items with historical minimums")
         return enriched_count
 
+    def enrich_candidate_items_with_history(self, lookback_periods: int = 12) -> int:
+        """
+        Enrich five_min_data with historical minimums for profitable candidate items.
+
+        Identifies profitable items using configured thresholds and enriches them
+        with historical buy price minimums from timeseries data.
+
+        Called by scheduler after bulk five_min_data refresh to prepare data for
+        all frontends (Discord, CLI, etc.). Each item is enriched at most once
+        per refresh cycle.
+
+        Workflow:
+        1. Domain layer identifies profitable items at display thresholds
+        2. Deduplicate item IDs across profit tiers
+        3. Delegate to enrichment method which calls API layer for historical data
+
+        Args:
+            lookback_periods: Number of 5-minute periods to analyze (default 12 = 1 hour)
+
+        Returns:
+            Number of items successfully enriched
+        """
+        if not self.current_prices or not self.five_min_data:
+            logger.warning("Cannot enrich - missing current_prices or five_min_data")
+            return 0
+
+        logger.info("Identifying candidate items for historical enrichment...")
+
+        # Engine coordinates workflow: domain layer filters profitable items
+        # Use configured threshold to capture all items that frontends might display
+        candidate_items = alchemy.get_profitable_items(
+            self.item_mapping, self.current_prices, self.five_min_data,
+            self.nature_rune_cost, self.non_alchemizable_keywords,
+            min_profit=config.ENRICHMENT_MIN_PROFIT,
+            max_items=500,  # Get enough to cover all display tiers
+            min_limit=config.SUPER_HOT_MIN_LIMIT,
+            min_volume=config.SUPER_HOT_MIN_VOLUME,
+            max_roi=config.SUPER_HOT_MAX_ROI
+        )
+
+        # Extract and deduplicate item IDs
+        item_ids = list(set(item['item_id'] for item in candidate_items))
+
+        if not item_ids:
+            logger.info("No candidate items found for enrichment")
+            return 0
+
+        logger.info(f"Enriching {len(item_ids)} candidate items with historical data...")
+
+        # Delegate to existing enrichment method (which calls API layer)
+        return self.enrich_five_min_with_minimums(item_ids, lookback_periods)
+
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
         """
         Fetch historical price data for an item
@@ -261,12 +313,12 @@ class OSRSAlchemyFlippingCalculator:
     def get_profitable_items(self, min_profit: int = 0, max_items: int = 100,
                            members_only: bool = None, max_buy_price: int = None,
                            min_limit: int = None, min_volume: int = None,
-                           max_roi: float = None, enrich_with_5m_history: bool = False) -> List[Dict]:
+                           max_roi: float = None) -> List[Dict]:
         """
-        Get list of profitable high alchemy items.
+        Get list of profitable high alchemy items using prepared market data.
 
-        Engine workflow: Filters profitable items, optionally enriches with
-        5-minute historical data, and returns fully prepared results.
+        Consumes prepared five_min_data which includes historical enrichment
+        populated by the scheduler refresh workflow.
 
         Args:
             min_profit: Minimum profit per cast
@@ -276,8 +328,6 @@ class OSRSAlchemyFlippingCalculator:
             min_limit: Minimum buying limit (None for no limit)
             min_volume: Minimum hourly trading volume (None for no limit)
             max_roi: Maximum ROI percentage (None for no limit)
-            enrich_with_5m_history: If True, enriches results with 5m historical
-                minimums for buy signal analysis (default: False)
 
         Returns:
             List of profitable items sorted by profit descending
@@ -288,7 +338,7 @@ class OSRSAlchemyFlippingCalculator:
             if self.is_alchemizable(self.item_mapping[item_id])
         )
 
-        # Phase 1: Get profitable items with current data
+        # Get profitable items using prepared data (includes historical enrichment from scheduler)
         profitable_items = alchemy.get_profitable_items(
             self.item_mapping, self.current_prices, self.five_min_data,
             self.nature_rune_cost, self.non_alchemizable_keywords,
@@ -297,22 +347,6 @@ class OSRSAlchemyFlippingCalculator:
         )
 
         logger.info(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
-
-        # Phase 2: Optional historical enrichment (engine workflow)
-        if enrich_with_5m_history and profitable_items:
-            logger.debug(f"Enriching {len(profitable_items)} items with 5m historical data...")
-            item_ids = [item['item_id'] for item in profitable_items]
-            enriched_count = self.enrich_five_min_with_minimums(item_ids, lookback_periods=12)
-
-            if enriched_count > 0:
-                # Re-calculate items to include enriched five_min_data
-                profitable_items = alchemy.get_profitable_items(
-                    self.item_mapping, self.current_prices, self.five_min_data,
-                    self.nature_rune_cost, self.non_alchemizable_keywords,
-                    min_profit, max_items, members_only, max_buy_price,
-                    min_limit, min_volume, max_roi
-                )
-                logger.debug(f"Items re-calculated with enriched data")
 
         return profitable_items
 

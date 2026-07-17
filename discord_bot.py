@@ -88,6 +88,8 @@ class OSRSAlchemyBot(commands.Bot):
         self.super_hot_min_volume = config.SUPER_HOT_MIN_VOLUME
         self.super_hot_max_roi = config.SUPER_HOT_MAX_ROI
 
+        self.is_refreshing = False
+
     # Emoji → (notification_type, display_label) mapping.
     # Drives the opt-in embed, reaction list, handler, and DM confirmations.
     REACTION_MAP = {
@@ -110,6 +112,13 @@ class OSRSAlchemyBot(commands.Bot):
             logger.error(f"Failed to sync commands: {e}")
 
         await self.load_channel_config()
+
+        # Start background market data refresh task
+        if not self.is_refreshing:
+            logger.info("Starting background market data refresh...")
+            self.background_refresh_loop.start()
+            self.is_refreshing = True
+            logger.info(f"Background refresh started (every {config.REFRESH_INTERVAL_CURRENT_PRICES}s)")
 
         if self.channel_config:
             await self.start_monitoring()
@@ -227,8 +236,10 @@ class OSRSAlchemyBot(commands.Bot):
     async def fetch_and_analyze(self):
         logger.info("Fetching data for analysis...")
 
-        # Use scheduler to refresh data based on configured intervals
-        if not self.scheduler.refresh_all():
+        # Wait for initial data from background refresh task
+        # Background task continuously refreshes market data independently
+        if not self.calculator.current_prices or not self.calculator.item_mapping:
+            logger.warning("Waiting for initial market data from background refresh task...")
             return None, None, None, None
 
         logger.info(
@@ -241,8 +252,11 @@ class OSRSAlchemyBot(commands.Bot):
             f"ROI ≤{self.super_hot_max_roi}%"
         )
 
-        # Request fully prepared market data from engine with 5m historical enrichment.
-        # Engine handles the complete workflow: filtering, enrichment, and preparation.
+        # Read fully prepared market data from engine.
+        # Background refresh task has already:
+        #   - Refreshed current_prices, volume_data, five_min_data
+        #   - Enriched five_min_data with historical minimums
+        # This method performs zero network I/O - only reads prepared data.
 
         # Super hot — top profitable items, members and F2P
         super_hot = self.calculator.get_profitable_items(
@@ -250,8 +264,7 @@ class OSRSAlchemyBot(commands.Bot):
             max_items=self.super_hot_max_items,
             min_limit=self.super_hot_min_limit,
             min_volume=self.super_hot_min_volume,
-            max_roi=self.super_hot_max_roi,
-            enrich_with_5m_history=True  # Engine enriches before returning
+            max_roi=self.super_hot_max_roi
         )
 
         # Hot items — 450–999gp tier. max_items=200 ensures we reach this
@@ -262,8 +275,7 @@ class OSRSAlchemyBot(commands.Bot):
                 max_items=200,
                 min_limit=self.super_hot_min_limit,
                 min_volume=self.super_hot_min_volume,
-                max_roi=self.super_hot_max_roi,
-                enrich_with_5m_history=True  # Engine enriches before returning
+                max_roi=self.super_hot_max_roi
             )
             if item['profit'] < self.super_hot_min_profit
         ][:15]
@@ -276,8 +288,7 @@ class OSRSAlchemyBot(commands.Bot):
             max_items=500,
             min_limit=self.super_hot_min_limit,
             min_volume=self.super_hot_min_volume,
-            max_roi=self.super_hot_max_roi,
-            enrich_with_5m_history=True  # Engine enriches before returning
+            max_roi=self.super_hot_max_roi
         )
         all_alchs = all_profitable[:20]
 
@@ -503,7 +514,29 @@ class OSRSAlchemyBot(commands.Bot):
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-    @tasks.loop(minutes=config.MONITORING_INTERVAL_MINUTES)
+    @tasks.loop(seconds=config.REFRESH_INTERVAL_CURRENT_PRICES)
+    async def background_refresh_loop(self):
+        """
+        Background task that continuously refreshes market data.
+
+        Runs independently from Discord event loop using asyncio.to_thread
+        to avoid blocking. Scheduler handles staleness checks and triggers
+        engine enrichment workflow.
+
+        Blocking HTTP requests and time.sleep() occur in worker thread only,
+        never in Discord event loop.
+        """
+        try:
+            # Run synchronous scheduler.refresh_all() in thread pool
+            # This includes blocking HTTP requests and historical enrichment
+            await asyncio.to_thread(self.scheduler.refresh_all)
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Error in background refresh: {e}")
+            logger.error(traceback.format_exc())
+
+    @tasks.loop(seconds=config.MONITORING_INTERVAL_SECONDS)
     async def monitor_prices_with_links(self):
         try:
             super_hot, hot_items, all_alchs, f2p_alchs = (
@@ -525,7 +558,20 @@ class OSRSAlchemyBot(commands.Bot):
         if self.is_monitoring:
             return
 
-        logger.info("Running initial update...")
+        logger.info("Waiting for initial market data from background refresh...")
+
+        # Wait briefly for background refresh to load initial data
+        # Background task runs every 2 seconds, so wait up to 10 seconds
+        max_wait_seconds = 10
+        waited = 0
+        while (not self.calculator.current_prices or not self.calculator.item_mapping) and waited < max_wait_seconds:
+            await asyncio.sleep(1)
+            waited += 1
+
+        if not self.calculator.current_prices or not self.calculator.item_mapping:
+            logger.warning("Initial data not available yet - monitoring will start when data is ready")
+        else:
+            logger.info("Initial data loaded - running first update...")
 
         try:
             super_hot, hot_items, all_alchs, f2p_alchs = (
@@ -546,7 +592,7 @@ class OSRSAlchemyBot(commands.Bot):
         self.monitor_prices_with_links.start()
         self.is_monitoring = True
 
-        logger.info(f"Started monitoring every {config.MONITORING_INTERVAL_MINUTES} minutes")
+        logger.info(f"Started monitoring every {config.MONITORING_INTERVAL_SECONDS} seconds")
 
 
 @commands.command(name='test')

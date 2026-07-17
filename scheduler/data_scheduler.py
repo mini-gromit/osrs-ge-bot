@@ -140,6 +140,9 @@ class DataScheduler:
         """
         Refresh 5-minute price data if stale.
 
+        After successful refresh, triggers historical enrichment workflow
+        to prepare data for all frontends.
+
         Args:
             force: If True, refresh regardless of staleness
 
@@ -155,6 +158,9 @@ class DataScheduler:
         if success:
             self._last_fetch_times['five_minute_data'] = time.time()
             logger.debug("5-minute data refreshed successfully")
+
+            # Trigger enrichment workflow - engine handles candidate selection
+            self.calculator.enrich_candidate_items_with_history()
         else:
             logger.warning("Failed to refresh 5-minute data")
 

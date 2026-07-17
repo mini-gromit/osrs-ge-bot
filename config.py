@@ -46,8 +46,15 @@ SUPER_HOT_MIN_LIMIT = 7
 SUPER_HOT_MIN_VOLUME = 20
 SUPER_HOT_MAX_ROI = 225
 
+# Historical enrichment threshold
+# Items with profit >= this value will have historical data enriched during refresh
+ENRICHMENT_MIN_PROFIT = 100  # Covers all display tiers
+
 # Bot monitoring interval (in minutes)
 MONITORING_INTERVAL_MINUTES = 2
+
+# Bot monitoring interval (in seconds)
+MONITORING_INTERVAL_SECONDS = 10
 
 # Alert persistence (in minutes)
 ALERT_PERSISTENCE_MINUTES = 2

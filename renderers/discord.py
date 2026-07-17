@@ -14,6 +14,54 @@ class DiscordRenderer:
     """
 
     @staticmethod
+    def format_volume_compact(volume: int) -> str:
+        """
+        Format volume with k/m suffix for compact display.
+
+        Args:
+            volume: Volume count (hourly)
+
+        Returns:
+            Formatted string like "850", "2.4k", "18k"
+        """
+        if volume >= 10000:
+            return f"{volume/1000:.0f}k"
+        elif volume >= 1000:
+            return f"{volume/1000:.1f}k"
+        else:
+            return str(volume)
+
+    @staticmethod
+    def format_5m_price_range(avg_low: Optional[int], lowest_buy: Optional[int]) -> str:
+        """
+        Format 5-minute price range with arrow notation.
+
+        Shows average and lowest as range, or just what's available.
+        Uses ─ for missing data instead of "N/A".
+
+        Args:
+            avg_low: 5-minute average low price
+            lowest_buy: Lowest observed buy price in recent 5m windows
+
+        Returns:
+            Formatted string like "2,450→2,350", "2,450", or "─"
+        """
+        if avg_low is None and lowest_buy is None:
+            return "─"
+
+        if avg_low is None:
+            return f"→{lowest_buy:,}" if lowest_buy else "─"
+
+        if lowest_buy is None:
+            return f"{avg_low:,}"
+
+        # Both available - show range if different
+        if avg_low == lowest_buy:
+            return f"{avg_low:,}"
+
+        return f"{avg_low:,}→{lowest_buy:,}"
+
+    @staticmethod
     def get_item_ge_tracker_url(item_id: Optional[int] = None, item_name: Optional[str] = None) -> Optional[str]:
         """
         Generate GE-Tracker URL for an item.
@@ -41,18 +89,21 @@ class DiscordRenderer:
         return None
 
     @staticmethod
-    def create_alchemy_embed(items: List[Dict], title: str, color: discord.Color) -> discord.Embed:
+    def create_alchemy_embed(
+        items: List[Dict],
+        title: str,
+        color: discord.Color
+    ) -> discord.Embed:
         """
-        Create a Discord embed for alchemy items.
+        Compact trading-terminal style embed.
 
-        Args:
-            items: List of alchemy item dicts
-            title: Embed title
-            color: Discord color
+        One item = two lines.
 
-        Returns:
-            Discord embed
+        ⭐ = Current buy is at the best 5m buy opportunity.
+        🏆 = Members
+        💎 = F2P
         """
+
         embed = discord.Embed(
             title=title,
             color=color,
@@ -63,38 +114,111 @@ class DiscordRenderer:
             embed.description = "No items found."
             return embed
 
-        for i, item in enumerate(items[:10], 1):
+        lines = []
+
+        for i, item in enumerate(items[:15], 1):
+
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
-                item_id=item.get('item_id'),
-                item_name=item.get('name')
+                item_id=item.get("item_id"),
+                item_name=item.get("name"),
             )
 
-            member_tag = "[M]" if item.get('members') else "[F2P]"
+            member = "🏆" if item.get("members") else "💎"
 
-            # Format 5-minute buy price data safely
-            five_min_avg_low = item.get('five_min_avg_low')
-            five_min_lowest_buy = item.get('five_min_lowest_buy')
-            is_at_five_min_low = item.get('is_at_five_min_low', False)
+            star = " ⭐" if item.get("is_at_five_min_low") else ""
 
-            avg_low_str = f"{five_min_avg_low:,} gp" if five_min_avg_low is not None else "N/A"
-            lowest_buy_str = f"{five_min_lowest_buy:,} gp" if five_min_lowest_buy is not None else "N/A"
-
-            # Add indicator emoji if current price is at lowest observed level
-            name_indicator = " ⭐" if is_at_five_min_low else ""
-
-            embed.add_field(
-                name=f"{i}. {member_tag} {item['name']}{name_indicator}",
-                value=(
-                    f"[URL]({ge_url})\n"
-                    f"Profit: {item['profit']:,} gp\n"
-                    f"Current Buy: {item['buy_price']:,} gp\n"
-                    f"5m Avg Low: {avg_low_str}\n"
-                    f"5m Lowest: {lowest_buy_str}"
-                ),
-                inline=True
+            price_range = DiscordRenderer.format_5m_price_range(
+                item.get("five_min_avg_low"),
+                item.get("five_min_lowest_buy"),
             )
+
+            volume = DiscordRenderer.format_volume_compact(
+                item.get("recent_volume", 0)
+            )
+
+            lines.append(
+                f"**{i}. {member} [{item['name']}]({ge_url}){star}**"
+                f"`{item['profit']:,} gp` • "
+                f"Buy `{item['buy_price']:,}` • "
+                f"5m `{price_range}` • "
+                f"Vol `{volume}/hr`"
+            )
+
+        embed.description = "\n\n".join(lines)
+
+        embed.set_footer(
+            text="⭐ Current buy matches lowest 5m buy opportunity"
+        )
 
         return embed
+
+    # @staticmethod
+    # def create_alchemy_embed(items: List[Dict], title: str, color: discord.Color) -> discord.Embed:
+    #     """
+    #     Create a compact Discord embed optimized for rapid trading decisions.
+
+    #     Layout: Trading Terminal (2 lines per item)
+    #     - Line 1: Rank, emoji, clickable name, star indicator
+    #     - Line 2: Profit • Buy price • 5m range • Volume
+
+    #     Args:
+    #         items: List of alchemy item dicts
+    #         title: Embed title
+    #         color: Discord color
+
+    #     Returns:
+    #         Discord embed
+    #     """
+    #     embed = discord.Embed(
+    #         title=title,
+    #         color=color,
+    #         timestamp=datetime.now()
+    #     )
+
+    #     if not items:
+    #         embed.description = "No items found."
+    #         return embed
+
+    #     for i, item in enumerate(items[:12], 1):  # Increased from 10 to 12
+    #         ge_url = DiscordRenderer.get_item_ge_tracker_url(
+    #             item_id=item.get('item_id'),
+    #             item_name=item.get('name')
+    #         )
+
+    #         # Member status as emoji (faster recognition than text)
+    #         member_emoji = "🏆" if item.get('members') else "💎"
+
+    #         # Star indicator for items at historical low
+    #         star = " ⭐" if item.get('is_at_five_min_low', False) else ""
+
+    #         # Format 5-minute price range (avg→lowest or just available)
+    #         price_range = DiscordRenderer.format_5m_price_range(
+    #             item.get('five_min_avg_low'),
+    #             item.get('five_min_lowest_buy')
+    #         )
+
+    #         # Format volume compactly (850, 2.4k, 18k)
+    #         volume = item.get('recent_volume', 0)
+    #         volume_str = DiscordRenderer.format_volume_compact(volume)
+
+    #         # Make field name clickable (removes URL from value)
+    #         field_name = f"{i}. [{member_emoji} {item['name']}]({ge_url}){star}"
+
+    #         # Compact value: profit • buy • 5m range • volume
+    #         field_value = (
+    #             f"{item['profit']:,} gp • "
+    #             f"Buy {item['buy_price']:,} • "
+    #             f"5m {price_range} • "
+    #             f"Vol {volume_str}/hr"
+    #         )
+
+    #         embed.add_field(
+    #             name=field_name,
+    #             value=field_value,
+    #             inline=True
+    #         )
+
+    #     return embed
 
     @staticmethod
     def create_notification_embed(items: List[Dict], title: str) -> discord.Embed:
