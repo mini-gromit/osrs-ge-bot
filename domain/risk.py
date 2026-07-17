@@ -300,3 +300,163 @@ def analyze_flipping_trend(item_id: int, current_prices: Dict, five_min_data: Di
         result['status'] = 'error'
 
     return result
+
+
+def generate_crash_explanation(
+    status: str,
+    volume_ratio: float,
+    volume_spike: bool,
+    severity_score: int
+) -> str:
+    """
+    Generate plain-English explanation of crash risk situation.
+
+    Args:
+        status: Current status ('crash_risk' or 'crashing')
+        volume_ratio: Ratio of sell volume to buy volume
+        volume_spike: Whether there's unusual volume activity
+        severity_score: Risk severity (0-100)
+
+    Returns:
+        Business-focused explanation string
+    """
+    if status == 'crashing':
+        base = f"Heavy sell pressure detected: {volume_ratio:.1f}x more players selling than buying."
+    elif status == 'crash_risk':
+        base = f"Elevated sell pressure: {volume_ratio:.1f}x more players selling than buying."
+    else:
+        return "Market conditions stable"
+
+    if volume_spike:
+        base += " Unusual volume activity detected."
+
+    if severity_score >= 35:
+        base += " Price likely declining rapidly."
+    elif severity_score >= 20:
+        base += " Price may be declining."
+
+    return base
+
+
+def generate_crash_impact_summary(
+    profit: int,
+    roi_percent: float,
+    max_profit_per_limit: int,
+    trade_limit: int
+) -> str:
+    """
+    Generate summary of profit opportunity impact.
+
+    Args:
+        profit: Profit per item
+        roi_percent: Return on investment percentage
+        max_profit_per_limit: Maximum profit if buying full limit
+        trade_limit: How many can be bought
+
+    Returns:
+        Business-focused impact summary
+    """
+    parts = []
+
+    # Profit per item
+    parts.append(f"{profit:,} gp profit per alch")
+
+    # Max profit potential
+    if max_profit_per_limit > 0:
+        parts.append(f"{max_profit_per_limit:,} gp max (limit: {trade_limit})")
+
+    # ROI
+    if roi_percent >= 50:
+        parts.append(f"{roi_percent:.0f}% ROI (excellent)")
+    elif roi_percent >= 30:
+        parts.append(f"{roi_percent:.0f}% ROI (good)")
+    elif roi_percent >= 15:
+        parts.append(f"{roi_percent:.0f}% ROI (moderate)")
+    else:
+        parts.append(f"{roi_percent:.0f}% ROI")
+
+    return " • ".join(parts)
+
+
+def generate_flip_explanation(
+    status: str,
+    price_change_percent: float,
+    volume_spike: bool,
+    severity_score: int
+) -> str:
+    """
+    Generate plain-English explanation of flipping trend situation.
+
+    Args:
+        status: Current status ('crashing', 'crash_risk', 'surging', 'surge_risk')
+        price_change_percent: Price change percentage
+        volume_spike: Whether there's unusual volume activity
+        severity_score: Severity score (0-100)
+
+    Returns:
+        Business-focused explanation string
+    """
+    if status == 'crashing':
+        base = f"Price crashing: down {abs(price_change_percent):.1f}% in last 5 minutes."
+    elif status == 'crash_risk':
+        base = f"Price declining: down {abs(price_change_percent):.1f}% in last 5 minutes."
+    elif status == 'surging':
+        base = f"Price surging: up {price_change_percent:.1f}% in last 5 minutes."
+    elif status == 'surge_risk':
+        base = f"Price rising: up {price_change_percent:.1f}% in last 5 minutes."
+    else:
+        return "Price stable"
+
+    if volume_spike:
+        base += " Unusual trading activity detected."
+
+    if status in ['crashing', 'crash_risk']:
+        if severity_score >= 35:
+            base += " Avoid buying - high crash risk."
+        elif severity_score >= 20:
+            base += " Exercise caution."
+    elif status in ['surging', 'surge_risk']:
+        if severity_score >= 35:
+            base += " Strong upward momentum."
+        elif severity_score >= 15:
+            base += " Potential opportunity."
+
+    return base
+
+
+def generate_flip_impact_summary(
+    margin: int,
+    margin_percent: float,
+    max_profit_per_limit: int,
+    trade_limit: int
+) -> str:
+    """
+    Generate summary of flipping opportunity impact.
+
+    Args:
+        margin: Margin per flip
+        margin_percent: Margin as percentage
+        max_profit_per_limit: Maximum profit if flipping full limit
+        trade_limit: How many can be flipped
+
+    Returns:
+        Business-focused impact summary
+    """
+    parts = []
+
+    # Margin per flip
+    parts.append(f"{margin:,} gp margin per flip")
+
+    # Margin percentage
+    if margin_percent >= 10:
+        parts.append(f"{margin_percent:.1f}% margin (excellent)")
+    elif margin_percent >= 5:
+        parts.append(f"{margin_percent:.1f}% margin (good)")
+    else:
+        parts.append(f"{margin_percent:.1f}% margin")
+
+    # Max profit potential
+    if max_profit_per_limit > 0:
+        parts.append(f"{max_profit_per_limit:,} gp max (limit: {trade_limit})")
+
+    return " • ".join(parts)

@@ -102,6 +102,13 @@ class OSRSAlchemyBot(commands.Bot):
         logger.info(f'{self.user} has connected to Discord!')
         logger.info(f'Bot is in {len(self.guilds)} guilds')
 
+        # Sync slash commands
+        try:
+            synced = await self.tree.sync()
+            logger.info(f"Synced {len(synced)} slash command(s)")
+        except Exception as e:
+            logger.error(f"Failed to sync commands: {e}")
+
         await self.load_channel_config()
 
         if self.channel_config:
@@ -234,13 +241,17 @@ class OSRSAlchemyBot(commands.Bot):
             f"ROI ≤{self.super_hot_max_roi}%"
         )
 
+        # Request fully prepared market data from engine with 5m historical enrichment.
+        # Engine handles the complete workflow: filtering, enrichment, and preparation.
+
         # Super hot — top profitable items, members and F2P
         super_hot = self.calculator.get_profitable_items(
             min_profit=self.super_hot_min_profit,
             max_items=self.super_hot_max_items,
             min_limit=self.super_hot_min_limit,
             min_volume=self.super_hot_min_volume,
-            max_roi=self.super_hot_max_roi
+            max_roi=self.super_hot_max_roi,
+            enrich_with_5m_history=True  # Engine enriches before returning
         )
 
         # Hot items — 450–999gp tier. max_items=200 ensures we reach this
@@ -251,7 +262,8 @@ class OSRSAlchemyBot(commands.Bot):
                 max_items=200,
                 min_limit=self.super_hot_min_limit,
                 min_volume=self.super_hot_min_volume,
-                max_roi=self.super_hot_max_roi
+                max_roi=self.super_hot_max_roi,
+                enrich_with_5m_history=True  # Engine enriches before returning
             )
             if item['profit'] < self.super_hot_min_profit
         ][:15]
@@ -264,7 +276,8 @@ class OSRSAlchemyBot(commands.Bot):
             max_items=500,
             min_limit=self.super_hot_min_limit,
             min_volume=self.super_hot_min_volume,
-            max_roi=self.super_hot_max_roi
+            max_roi=self.super_hot_max_roi,
+            enrich_with_5m_history=True  # Engine enriches before returning
         )
         all_alchs = all_profitable[:20]
 
@@ -534,167 +547,6 @@ class OSRSAlchemyBot(commands.Bot):
         self.is_monitoring = True
 
         logger.info(f"Started monitoring every {config.MONITORING_INTERVAL_MINUTES} minutes")
-
-
-# ------------------------------------------------------------------ #
-# !setup
-#
-# Uses FlexibleChannelConverter so all of these work identically:
-#   !setup #super-hot #hot-items
-#   !setup #super-hot #hot-items #welcome
-#   !setup #super-hot #hot-items #welcome #all-alchs #f2p-alchs
-#   !setup super-hot hot-items          (no # prefix)
-#   !setup 123456789 987654321          (raw channel IDs)
-# ------------------------------------------------------------------ #
-@commands.command(name='setup')
-async def setup_channels(
-    ctx,
-    super_hot_channel: FlexibleChannelConverter,
-    hot_channel: FlexibleChannelConverter,
-    welcome_channel: Optional[FlexibleChannelConverter] = None,
-    all_alchs_channel: Optional[FlexibleChannelConverter] = None,
-    f2p_alchs_channel: Optional[FlexibleChannelConverter] = None,
-    crash_risk_channel: Optional[FlexibleChannelConverter] = None,
-    flipping_trend_channel: Optional[FlexibleChannelConverter] = None,
-):
-    bot = ctx.bot
-
-    bot.channel_config = ChannelConfig(
-        super_hot_items=super_hot_channel.id,
-        hot_items=hot_channel.id,
-        welcome_channel=welcome_channel.id if welcome_channel else None,
-        all_alchs=all_alchs_channel.id if all_alchs_channel else None,
-        f2p_alchs=f2p_alchs_channel.id if f2p_alchs_channel else None,
-        crash_risk_alerts=crash_risk_channel.id if crash_risk_channel else None,
-        flipping_trend_alerts=flipping_trend_channel.id if flipping_trend_channel else None,
-    )
-
-    await bot.save_channel_config()
-
-    lines = [
-        "✅ Channels configured.",
-        f"🔥 Super Hot → {super_hot_channel.mention}",
-        f"🌟 Hot Items  → {hot_channel.mention}",
-    ]
-    if welcome_channel:
-        lines.append(f"👋 Welcome    → {welcome_channel.mention}")
-    if all_alchs_channel:
-        lines.append(f"🧪 All Alchs  → {all_alchs_channel.mention}")
-    if f2p_alchs_channel:
-        lines.append(f"🆓 F2P Alchs  → {f2p_alchs_channel.mention}")
-    if crash_risk_channel:
-        lines.append(f"🚨 Crash Risk → {crash_risk_channel.mention}")
-    if flipping_trend_channel:
-        lines.append(f"📊 Flip Trends → {flipping_trend_channel.mention}")
-
-    await ctx.send("\n".join(lines))
-    await bot.start_monitoring()
-
-
-@commands.command(name='setup_help')
-async def setup_help(ctx):
-    embed = discord.Embed(
-        title="!setup usage",
-        color=discord.Color.blue(),
-        description=(
-            "Configure which channels the bot posts to.\n"
-            "All channels after the first two are optional.\n\n"
-            "**Accepted formats for each channel:**\n"
-            "• Click the channel name so Discord auto-inserts a mention\n"
-            "• Type the name with or without `#`  e.g. `super-hot`\n"
-            "• Paste the raw channel ID  e.g. `1234567890`\n\n"
-            "**Channel order:**\n"
-            "1. Super Hot (required)\n"
-            "2. Hot Items (required)\n"
-            "3. Welcome (optional)\n"
-            "4. All Alchs (optional)\n"
-            "5. F2P Alchs (optional)\n"
-            "6. Crash Risk Alerts (optional)\n"
-            "7. Flipping Trend Alerts (optional)\n\n"
-            "**Examples:**\n"
-            "`!setup #super-hot #hot-items`\n"
-            "`!setup #super-hot #hot-items #welcome`\n"
-            "`!setup #super-hot #hot-items #welcome #all-alchs #f2p-alchs #crash-alerts #flip-alerts`"
-        )
-    )
-    await ctx.send(embed=embed)
-
-
-@commands.command(name='create_optin')
-async def create_optin(ctx):
-    bot = ctx.bot
-
-    if not bot.channel_config:
-        await ctx.send("❌ Run !setup first.")
-        return
-
-    channel = bot.get_channel(bot.channel_config.welcome_channel)
-
-    if not channel:
-        await ctx.send("❌ Welcome channel not set or not found.")
-        return
-
-    embed = discord.Embed(
-        title="🔔 Notification Subscriptions",
-        description=(
-            "React below to subscribe to DM alerts.\n\n"
-            "🔥 **Super Hot** — profit >1,000gp\n"
-            "🌟 **Hot Items** — profit 450–999gp\n"
-            "🧪 **All Alchs** — any profitable alch\n"
-            "🆓 **F2P Alchs** — F2P profitable alchs only\n"
-            "🔕 **Unsubscribe** — remove all alerts"
-        ),
-        color=discord.Color.gold()
-    )
-
-    msg = await channel.send(embed=embed)
-
-    for emoji in bot.REACTION_MAP.keys():
-        await msg.add_reaction(emoji)
-
-    bot.opt_in_message_id = msg.id
-    await bot.save_channel_config()
-
-    await ctx.send("✅ Opt-in message created.")
-
-
-@commands.command(name='status')
-async def status_cmd(ctx):
-    bot = ctx.bot
-
-    embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
-
-    embed.add_field(
-        name="Monitoring",
-        value="✅ Active" if bot.is_monitoring else "❌ Stopped"
-    )
-
-    if bot.last_update:
-        embed.add_field(
-            name="Last Update",
-            value=bot.last_update.strftime('%Y-%m-%d %H:%M:%S')
-        )
-
-    if bot.channel_config:
-        lines = [
-            f"🔥 Super Hot: <#{bot.channel_config.super_hot_items}>",
-            f"🌟 Hot Items:  <#{bot.channel_config.hot_items}>",
-        ]
-        if bot.channel_config.all_alchs:
-            lines.append(f"🧪 All Alchs: <#{bot.channel_config.all_alchs}>")
-        if bot.channel_config.f2p_alchs:
-            lines.append(f"🆓 F2P Alchs: <#{bot.channel_config.f2p_alchs}>")
-        if bot.channel_config.crash_risk_alerts:
-            lines.append(f"🚨 Crash Risk: <#{bot.channel_config.crash_risk_alerts}>")
-        if bot.channel_config.flipping_trend_alerts:
-            lines.append(f"📊 Flip Trends: <#{bot.channel_config.flipping_trend_alerts}>")
-        embed.add_field(
-            name="Channels",
-            value="\n".join(lines),
-            inline=False
-        )
-
-    await ctx.send(embed=embed)
 
 
 @commands.command(name='test')

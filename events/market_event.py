@@ -36,6 +36,14 @@ class CrashRiskEvent(MarketEvent):
     severity_score: int
     hourly_volume: int
     volume_spike: bool
+    # Business context fields
+    trade_limit: int
+    roi_percent: float
+    members: bool
+    max_profit_per_limit: int
+    # Explanation fields
+    explanation: str
+    impact_summary: str
 
     def __init__(
         self,
@@ -53,6 +61,12 @@ class CrashRiskEvent(MarketEvent):
         severity_score: int,
         hourly_volume: int,
         volume_spike: bool,
+        trade_limit: int,
+        roi_percent: float,
+        members: bool,
+        max_profit_per_limit: int,
+        explanation: str,
+        impact_summary: str,
     ):
         super().__init__(event_type="crash_risk")
         self.name = name
@@ -69,6 +83,12 @@ class CrashRiskEvent(MarketEvent):
         self.severity_score = severity_score
         self.hourly_volume = hourly_volume
         self.volume_spike = volume_spike
+        self.trade_limit = trade_limit
+        self.roi_percent = roi_percent
+        self.members = members
+        self.max_profit_per_limit = max_profit_per_limit
+        self.explanation = explanation
+        self.impact_summary = impact_summary
 
 
 @dataclass
@@ -89,6 +109,13 @@ class FlippingTrendEvent(MarketEvent):
     severity_score: int
     hourly_volume: int
     volume_spike: bool
+    # Business context fields
+    trade_limit: int
+    members: bool
+    margin_percent: float
+    # Explanation fields
+    explanation: str
+    impact_summary: str
 
     def __init__(
         self,
@@ -105,6 +132,11 @@ class FlippingTrendEvent(MarketEvent):
         severity_score: int,
         hourly_volume: int,
         volume_spike: bool,
+        trade_limit: int,
+        members: bool,
+        margin_percent: float,
+        explanation: str,
+        impact_summary: str,
     ):
         super().__init__(event_type="flipping_trend")
         self.name = name
@@ -120,3 +152,8 @@ class FlippingTrendEvent(MarketEvent):
         self.severity_score = severity_score
         self.hourly_volume = hourly_volume
         self.volume_spike = volume_spike
+        self.trade_limit = trade_limit
+        self.members = members
+        self.margin_percent = margin_percent
+        self.explanation = explanation
+        self.impact_summary = impact_summary

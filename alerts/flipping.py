@@ -1,6 +1,7 @@
 from typing import List
 
 from events import FlippingTrendEvent
+from domain import risk
 
 
 def get_flipping_trend_alerts(
@@ -37,12 +38,32 @@ def get_flipping_trend_alerts(
         trend_analysis = calculator.analyze_flipping_trend(item_id)
 
         if trend_analysis["status"] != "stable":
+            # Get trade limit and calculate max profit
+            trade_limit = flip.get("limit", 0)
+            margin = flip["margin"]
+            max_profit_per_limit = margin * trade_limit if margin > 0 else 0
+
+            # Generate context explanations
+            explanation = risk.generate_flip_explanation(
+                status=trend_analysis["status"],
+                price_change_percent=trend_analysis["price_change_percent"],
+                volume_spike=trend_analysis.get("volume_spike", False),
+                severity_score=trend_analysis.get("severity_score", 0)
+            )
+
+            impact_summary = risk.generate_flip_impact_summary(
+                margin=margin,
+                margin_percent=flip.get("margin_percent", 0),
+                max_profit_per_limit=max_profit_per_limit,
+                trade_limit=trade_limit
+            )
+
             event = FlippingTrendEvent(
                 name=flip["name"],
                 item_id=item_id,
                 buy_price=flip["buy_price"],
                 sell_price=flip["sell_price"],
-                margin=flip["margin"],
+                margin=margin,
                 status=trend_analysis["status"],
                 price_change_percent=trend_analysis["price_change_percent"],
                 high_volume=trend_analysis["high_volume"],
@@ -50,7 +71,14 @@ def get_flipping_trend_alerts(
                 recommendation=trend_analysis["recommendation"],
                 severity_score=trend_analysis.get("severity_score", 0),
                 hourly_volume=trend_analysis.get("hourly_volume", 0),
-                volume_spike=trend_analysis.get("volume_spike", False)
+                volume_spike=trend_analysis.get("volume_spike", False),
+                # Business context fields
+                trade_limit=trade_limit,
+                members=flip.get("members", False),
+                margin_percent=flip.get("margin_percent", 0),
+                # Explanation fields
+                explanation=explanation,
+                impact_summary=impact_summary
             )
 
             alerts.append(event)

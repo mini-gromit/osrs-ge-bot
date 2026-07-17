@@ -79,16 +79,18 @@ class CLIRenderer:
         if relevant_alerts:
             print(f"\n🚨 CRASH RISK FOR YOUR ITEMS ({len(relevant_alerts)} items):")
             print("-" * 100)
-            print(f"{'Item':<25} | {'Profit':<8} | {'Status':<12} | {'Vol Ratio':<10} | {'Hourly Vol':<11} | {'Severity':<9} | {'Rec'}")
+            print(f"{'Item':<26} | {'Profit':<8} | {'ROI':<5} | {'Status':<12} | {'Vol Ratio':<10} | {'Hourly Vol':<11} | {'Severity':<9} | {'Rec'}")
             print("-" * 100)
 
             for alert in relevant_alerts:
                 status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
                 rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
                 vol_spike_emoji = '📈' if alert.volume_spike else ''
+                member_tag = "[M]" if alert.members else "[F2P]"
 
-                print(f"{status_emoji} {alert.name[:23]:<23} | "
+                print(f"{status_emoji} {alert.name[:20]:<20} {member_tag:<5} | "
                     f"{alert.profit:>7,.0f} | "
+                    f"{alert.roi_percent:>5.0f}% | "
                     f"{alert.status:<12} | "
                     f"{alert.volume_ratio:>8.1f}x | "
                     f"{alert.hourly_volume:>9,}{vol_spike_emoji:<2} | "
@@ -105,8 +107,10 @@ class CLIRenderer:
             for alert in other_alerts[:5]:
                 status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
                 vol_spike_emoji = '📈' if alert.volume_spike else ''
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                member_tag = "[M]" if alert.members else "[F2P]"
+                print(f"{status_emoji} {alert.name[:25]:<25} {member_tag:<5} | "
                     f"Profit: {alert.profit:>6,.0f} | "
+                    f"ROI: {alert.roi_percent:>4.0f}% | "
                     f"Vol Ratio: {alert.volume_ratio:>5.1f}x | "
                     f"Hourly Vol: {alert.hourly_volume:>7,}{vol_spike_emoji:<2} | "
                     f"Severity: {alert.severity_score:>2}/100")
@@ -141,11 +145,12 @@ class CLIRenderer:
                 }.get(alert.recommendation, '❓')
 
                 vol_spike_emoji = '📈' if alert.volume_spike else ''
+                member_tag = "[M]" if alert.members else "[F2P]"
 
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                print(f"{status_emoji} {alert.name[:25]:<25} {member_tag:<5} | "
                     f"Status: {alert.status:<12} | "
+                    f"Margin: {alert.margin:>6,.0f} ({alert.margin_percent:>4.1f}%) | "
                     f"Price Δ: {alert.price_change_percent:>6.1f}% | "
-                    f"Vol: {alert.high_volume:>4}/{alert.low_volume:<4} | "
                     f"Hourly: {alert.hourly_volume:>6,}{vol_spike_emoji:<2} | "
                     f"Sev: {alert.severity_score:>2}/100 | "
                     f"{recommendation_emoji} {alert.recommendation.upper()}")
@@ -169,9 +174,11 @@ class CLIRenderer:
                 }.get(alert.status, '⚪')
 
                 vol_spike_emoji = '📈' if alert.volume_spike else ''
+                member_tag = "[M]" if alert.members else "[F2P]"
 
-                print(f"{status_emoji} {alert.name[:30]:<30} | "
+                print(f"{status_emoji} {alert.name[:25]:<25} {member_tag:<5} | "
                     f"Status: {alert.status:<12} | "
+                    f"Margin: {alert.margin:>6,.0f} ({alert.margin_percent:>4.1f}%) | "
                     f"Price Δ: {alert.price_change_percent:>6.1f}% | "
                     f"Hourly: {alert.hourly_volume:>6,}{vol_spike_emoji:<2} | "
                     f"Sev: {alert.severity_score:>2}/100")

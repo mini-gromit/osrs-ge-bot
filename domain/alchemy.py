@@ -78,8 +78,18 @@ def calculate_alchemy_profit(item_id: int, item_mapping: Dict, current_prices: D
     roi_percent = (profit / total_cost) * 100 if total_cost > 0 else 0
 
     volume = 0
+    five_min_avg_low = None
+    five_min_lowest_buy = None
+    is_at_five_min_low = False
+
     if item_id in five_min_data:
         volume = five_min_data[item_id].get('low_volume', 0)
+        five_min_avg_low = five_min_data[item_id].get('avg_low')
+        five_min_lowest_buy = five_min_data[item_id].get('lowest_low')
+
+        # Business flag: current buy price is at or below the lowest observed 5m price
+        if five_min_lowest_buy is not None:
+            is_at_five_min_low = buy_price <= five_min_lowest_buy
 
     return {
         'item_id': item_id,
@@ -93,6 +103,9 @@ def calculate_alchemy_profit(item_id: int, item_mapping: Dict, current_prices: D
         'members': item_info['members'],
         'max_profit_per_limit': profit * item_info['limit'] if profit > 0 else 0,
         'recent_volume': volume,
+        'five_min_avg_low': five_min_avg_low,
+        'five_min_lowest_buy': five_min_lowest_buy,
+        'is_at_five_min_low': is_at_five_min_low,
         'alchemizable': True
     }
 

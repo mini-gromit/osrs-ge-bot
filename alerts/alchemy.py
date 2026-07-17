@@ -2,6 +2,7 @@ import logging
 from typing import List
 
 from events import CrashRiskEvent
+from domain import risk
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,21 @@ def get_alchemy_crash_alerts(
             crash_analysis.get("status") in ["crash_risk", "crashing"]
             and crash_analysis.get("volume_ratio", 0) >= min_volume_imbalance
         ):
+            # Generate context explanations
+            explanation = risk.generate_crash_explanation(
+                status=crash_analysis["status"],
+                volume_ratio=crash_analysis["volume_ratio"],
+                volume_spike=crash_analysis.get("volume_spike", False),
+                severity_score=crash_analysis.get("severity_score", 0)
+            )
+
+            impact_summary = risk.generate_crash_impact_summary(
+                profit=item["profit"],
+                roi_percent=item.get("roi_percent", 0),
+                max_profit_per_limit=item.get("max_profit_per_limit", 0),
+                trade_limit=item.get("limit", 0)
+            )
+
             event = CrashRiskEvent(
                 name=item["name"],
                 item_id=item_id,
@@ -101,7 +117,15 @@ def get_alchemy_crash_alerts(
                 ),
                 severity_score=crash_analysis.get("severity_score", 0),
                 hourly_volume=crash_analysis.get("hourly_volume", 0),
-                volume_spike=crash_analysis.get("volume_spike", False)
+                volume_spike=crash_analysis.get("volume_spike", False),
+                # Business context fields
+                trade_limit=item.get("limit", 0),
+                roi_percent=item.get("roi_percent", 0),
+                members=item.get("members", False),
+                max_profit_per_limit=item.get("max_profit_per_limit", 0),
+                # Explanation fields
+                explanation=explanation,
+                impact_summary=impact_summary
             )
 
             alerts.append(event)

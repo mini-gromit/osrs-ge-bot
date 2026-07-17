@@ -71,17 +71,25 @@ class DiscordRenderer:
 
             member_tag = "[M]" if item.get('members') else "[F2P]"
 
+            # Format 5-minute buy price data safely
+            five_min_avg_low = item.get('five_min_avg_low')
+            five_min_lowest_buy = item.get('five_min_lowest_buy')
+            is_at_five_min_low = item.get('is_at_five_min_low', False)
+
+            avg_low_str = f"{five_min_avg_low:,} gp" if five_min_avg_low is not None else "N/A"
+            lowest_buy_str = f"{five_min_lowest_buy:,} gp" if five_min_lowest_buy is not None else "N/A"
+
+            # Add indicator emoji if current price is at lowest observed level
+            name_indicator = " ⭐" if is_at_five_min_low else ""
+
             embed.add_field(
-                name=f"{i}. {member_tag} {item['name']}",
+                name=f"{i}. {member_tag} {item['name']}{name_indicator}",
                 value=(
-                    f"[GE-Tracker]({ge_url})\n"
+                    f"[URL]({ge_url})\n"
                     f"Profit: {item['profit']:,} gp\n"
-                    f"Buy: {item['buy_price']:,} gp\n"
-                    f"Alch: {item['high_alch_value']:,} gp\n"
-                    f"ROI: {item['roi_percent']:.1f}%\n"
-                    f"Current Profit: {item['profit']:,} gp\n"
-                    f"5m Max Seen: "
-                    f"{item.get('rolling_max_profit', item['profit']):,} gp"
+                    f"Current Buy: {item['buy_price']:,} gp\n"
+                    f"5m Avg Low: {avg_low_str}\n"
+                    f"5m Lowest: {lowest_buy_str}"
                 ),
                 inline=True
             )
@@ -153,6 +161,9 @@ class DiscordRenderer:
             # Recommendation emoji
             rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
 
+            # Members tag
+            member_tag = "[M]" if alert.members else "[F2P]"
+
             # Get GE-Tracker URL
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
@@ -162,20 +173,25 @@ class DiscordRenderer:
             # Volume spike indicator
             vol_spike_emoji = '📈' if alert.volume_spike else ''
 
+            # Build value sections
+            value_parts = [
+                f"[GE-Tracker]({ge_url})\n",
+                f"📊 **What's Happening**",
+                f"{alert.explanation}\n",
+                f"💰 **Profit Opportunity**",
+                f"{alert.impact_summary}\n",
+                f"⚠️ **Market Conditions**",
+                f"• Status: {alert.status.replace('_', ' ').title()}",
+                f"• Volume: {alert.hourly_volume:,}/hr {vol_spike_emoji}",
+                f"• Sell/Buy Ratio: {alert.volume_ratio:.1f}x",
+                f"• Severity: {alert.severity_score}/100\n",
+                f"👉 **Recommendation**",
+                f"{rec_emoji} {alert.recommendation.upper()}"
+            ]
+
             embed.add_field(
-                name=f"{status_emoji} {alert.name}",
-                value=(
-                    f"[GE-Tracker]({ge_url})\n"
-                    f"**Status:** {alert.status}\n"
-                    f"**Profit:** {alert.profit:,} gp\n"
-                    f"**Buy:** {alert.buy_price:,} gp\n"
-                    f"**Alch:** {alert.alch_value:,} gp\n"
-                    f"**Volume Ratio:** {alert.volume_ratio:.1f}x\n"
-                    f"**Hourly Volume:** {alert.hourly_volume:,} {vol_spike_emoji}\n"
-                    f"**Severity:** {alert.severity_score}/100\n"
-                    f"**Alert %:** {alert.alert_percent:.1f}%\n"
-                    f"{rec_emoji} **Rec:** {alert.recommendation.upper()}"
-                ),
+                name=f"{status_emoji} {alert.name} {member_tag}",
+                value="\n".join(value_parts),
                 inline=True
             )
 
@@ -230,6 +246,9 @@ class DiscordRenderer:
                 'safe': '✅'
             }.get(alert.recommendation, '❓')
 
+            # Members tag
+            member_tag = "[M]" if alert.members else "[F2P]"
+
             # Get GE-Tracker URL
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
@@ -239,20 +258,26 @@ class DiscordRenderer:
             # Volume spike indicator
             vol_spike_emoji = '📈' if alert.volume_spike else ''
 
+            # Build value sections
+            value_parts = [
+                f"[GE-Tracker]({ge_url})\n",
+                f"📊 **What's Happening**",
+                f"{alert.explanation}\n",
+                f"💰 **Flip Opportunity**",
+                f"{alert.impact_summary}\n",
+                f"⚠️ **Market Conditions**",
+                f"• Status: {alert.status.replace('_', ' ').title()}",
+                f"• Price Change: {alert.price_change_percent:+.1f}%",
+                f"• Volume: {alert.hourly_volume:,}/hr {vol_spike_emoji}",
+                f"• Buy/Sell: {alert.high_volume}/{alert.low_volume}",
+                f"• Severity: {alert.severity_score}/100\n",
+                f"👉 **Recommendation**",
+                f"{recommendation_emoji} {alert.recommendation.upper()}"
+            ]
+
             embed.add_field(
-                name=f"{status_emoji} {alert.name}",
-                value=(
-                    f"[GE-Tracker]({ge_url})\n"
-                    f"**Status:** {alert.status}\n"
-                    f"**Margin:** {alert.margin:,} gp\n"
-                    f"**Buy:** {alert.buy_price:,} gp\n"
-                    f"**Sell:** {alert.sell_price:,} gp\n"
-                    f"**Price Δ:** {alert.price_change_percent:+.1f}%\n"
-                    f"**Volume:** {alert.high_volume}/{alert.low_volume}\n"
-                    f"**Hourly Volume:** {alert.hourly_volume:,} {vol_spike_emoji}\n"
-                    f"**Severity:** {alert.severity_score}/100\n"
-                    f"{recommendation_emoji} **Rec:** {alert.recommendation.upper()}"
-                ),
+                name=f"{status_emoji} {alert.name} {member_tag}",
+                value="\n".join(value_parts),
                 inline=True
             )
 

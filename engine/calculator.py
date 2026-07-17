@@ -107,7 +107,12 @@ class OSRSAlchemyFlippingCalculator:
 
     def fetch_five_minute_data(self) -> bool:
         """
-        NEW: Fetch 5-minute price data for trend analysis
+        Fetch 5-minute price data for trend analysis.
+
+        Extracts current 5-minute window averages from the /5m endpoint.
+        Does NOT include historical minimum - use enrich_five_min_with_minimums()
+        for that additional data.
+
         Returns True if successful, False otherwise
         """
         logger.info("Fetching 5-minute price data for trend analysis...")
@@ -123,14 +128,80 @@ class OSRSAlchemyFlippingCalculator:
                 item_id = int(item_id_str)
                 self.five_min_data[item_id] = {
                     'high': data.get('avgHighPrice'),
-                    'low': data.get('avgLowPrice'),
+                    'avg_low': data.get('avgLowPrice'),  # Renamed for clarity
                     'high_volume': data.get('highPriceVolume', 0) or 0,
                     'low_volume': data.get('lowPriceVolume', 0) or 0,
-                    'timestamp': data.get('timestamp')
+                    'timestamp': data.get('timestamp'),
+                    'lowest_low': None  # Will be populated by enrich_five_min_with_minimums if called
                 }
 
         logger.info(f"Successfully fetched 5-minute data for {len(self.five_min_data)} items")
         return True
+
+    def enrich_five_min_with_minimums(self, item_ids: List[int], lookback_periods: int = 12) -> int:
+        """
+        Enrich five_min_data with historical minimum buy prices from recent timeseries.
+
+        For each item, fetches recent 5m timeseries data and finds the lowest
+        avgLowPrice observed across the specified number of 5-minute periods.
+
+        Skips items that are already enriched to avoid duplicate API calls.
+
+        This is an optional enhancement - only call for items that need buy signal analysis.
+        Fetching timeseries for all items would be too API-expensive.
+
+        Args:
+            item_ids: List of item IDs to enrich (typically profitable items only)
+            lookback_periods: Number of 5-minute periods to look back (default 12 = 1 hour)
+
+        Returns:
+            Number of items successfully enriched
+        """
+        if not item_ids:
+            return 0
+
+        # Filter out items that are already enriched
+        items_to_enrich = [
+            item_id for item_id in item_ids
+            if item_id not in self.five_min_data or self.five_min_data[item_id].get('lowest_low') is None
+        ]
+
+        if not items_to_enrich:
+            logger.debug(f"All {len(item_ids)} items already enriched, skipping")
+            return 0
+
+        logger.info(f"Enriching {len(items_to_enrich)} items with 5m historical minimums (last {lookback_periods} periods)...")
+        enriched_count = 0
+
+        for item_id in items_to_enrich:
+            try:
+                # Fetch 5-minute timeseries
+                ts_data = self.fetch_timeseries(item_id, timestep="5m")
+
+                if not ts_data or len(ts_data) < 2:
+                    continue
+
+                # Extract avgLowPrice from recent periods
+                recent_data = ts_data[-lookback_periods:] if len(ts_data) >= lookback_periods else ts_data
+                low_prices = [entry.get('avgLowPrice') for entry in recent_data if entry.get('avgLowPrice')]
+
+                if low_prices:
+                    lowest_low = min(low_prices)
+
+                    # Enrich existing five_min_data entry
+                    if item_id in self.five_min_data:
+                        self.five_min_data[item_id]['lowest_low'] = lowest_low
+                        enriched_count += 1
+
+                # Small delay to be respectful to API
+                time.sleep(0.05)
+
+            except Exception as e:
+                logger.warning(f"Error enriching item {item_id} with 5m minimums: {e}")
+                continue
+
+        logger.info(f"Successfully enriched {enriched_count}/{len(item_ids)} items with historical minimums")
+        return enriched_count
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
         """
@@ -190,9 +261,12 @@ class OSRSAlchemyFlippingCalculator:
     def get_profitable_items(self, min_profit: int = 0, max_items: int = 100,
                            members_only: bool = None, max_buy_price: int = None,
                            min_limit: int = None, min_volume: int = None,
-                           max_roi: float = None) -> List[Dict]:
+                           max_roi: float = None, enrich_with_5m_history: bool = False) -> List[Dict]:
         """
-        Get list of profitable high alchemy items
+        Get list of profitable high alchemy items.
+
+        Engine workflow: Filters profitable items, optionally enriches with
+        5-minute historical data, and returns fully prepared results.
 
         Args:
             min_profit: Minimum profit per cast
@@ -202,6 +276,8 @@ class OSRSAlchemyFlippingCalculator:
             min_limit: Minimum buying limit (None for no limit)
             min_volume: Minimum hourly trading volume (None for no limit)
             max_roi: Maximum ROI percentage (None for no limit)
+            enrich_with_5m_history: If True, enriches results with 5m historical
+                minimums for buy signal analysis (default: False)
 
         Returns:
             List of profitable items sorted by profit descending
@@ -212,6 +288,7 @@ class OSRSAlchemyFlippingCalculator:
             if self.is_alchemizable(self.item_mapping[item_id])
         )
 
+        # Phase 1: Get profitable items with current data
         profitable_items = alchemy.get_profitable_items(
             self.item_mapping, self.current_prices, self.five_min_data,
             self.nature_rune_cost, self.non_alchemizable_keywords,
@@ -220,6 +297,22 @@ class OSRSAlchemyFlippingCalculator:
         )
 
         logger.info(f"Filtering results: {total_items_checked} total items, {alchemizable_items} alchemizable, {len(profitable_items)} profitable")
+
+        # Phase 2: Optional historical enrichment (engine workflow)
+        if enrich_with_5m_history and profitable_items:
+            logger.debug(f"Enriching {len(profitable_items)} items with 5m historical data...")
+            item_ids = [item['item_id'] for item in profitable_items]
+            enriched_count = self.enrich_five_min_with_minimums(item_ids, lookback_periods=12)
+
+            if enriched_count > 0:
+                # Re-calculate items to include enriched five_min_data
+                profitable_items = alchemy.get_profitable_items(
+                    self.item_mapping, self.current_prices, self.five_min_data,
+                    self.nature_rune_cost, self.non_alchemizable_keywords,
+                    min_profit, max_items, members_only, max_buy_price,
+                    min_limit, min_volume, max_roi
+                )
+                logger.debug(f"Items re-calculated with enriched data")
 
         return profitable_items
 
