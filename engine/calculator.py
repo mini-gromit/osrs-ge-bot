@@ -729,6 +729,83 @@ class OSRSAlchemyFlippingCalculator:
             item_id, self.current_prices, self.five_min_data, self.volume_data
         )
 
+    def get_profitable_alchemy_events(
+        self,
+        min_profit: int = 1,
+        max_items: int = 500,
+        members_only: bool = None
+    ):
+        """
+        Get profitable alchemy opportunities as MarketEvent objects.
+
+        Wraps domain layer filtering (alchemy.get_profitable_items) into
+        MarketEvent objects for notification pipeline. Does not duplicate
+        business logic.
+
+        Severity score based on profit tier:
+        - profit >= 1000: severity 80 (super_hot tier)
+        - profit >= 450:  severity 60 (hot_items tier)
+        - profit >= 100:  severity 40 (all_alchs high-value)
+        - profit >= 1:    severity 20 (all_alchs low-value)
+
+        Args:
+            min_profit: Minimum profit threshold (default: 1gp)
+            max_items: Maximum items to return (default: 500)
+            members_only: Filter to members items only (default: None = both)
+
+        Returns:
+            List of ProfitableAlchemyEvent objects sorted by profit descending
+        """
+        from events import ProfitableAlchemyEvent
+
+        # Delegate to existing business logic - no duplication
+        profitable_items = alchemy.get_profitable_items(
+            self.item_mapping,
+            self.current_prices,
+            self.five_min_data,
+            self.nature_rune_cost,
+            self.non_alchemizable_keywords,
+            min_profit,
+            max_items,
+            members_only,
+            None,  # max_buy_price
+            None,  # min_limit
+            None,  # min_volume
+            None   # max_roi
+        )
+
+        # Wrap in MarketEvent objects
+        events = []
+        for item in profitable_items:
+            profit = item['profit']
+
+            # Calculate severity score based on profit tier
+            if profit >= config.DEFAULT_SUPER_HOT_MIN_PROFIT:
+                severity_score = config.SEVERITY_SUPER_HOT
+            elif profit >= config.DEFAULT_HOT_ITEMS_MIN_PROFIT:
+                severity_score = config.SEVERITY_HOT_ITEMS
+            elif profit >= 100:
+                severity_score = config.SEVERITY_ALL_ALCHS_HIGH
+            else:
+                severity_score = config.SEVERITY_ALL_ALCHS_LOW
+
+            event = ProfitableAlchemyEvent(
+                name=item['name'],
+                item_id=item['item_id'],
+                profit=profit,
+                buy_price=item['buy_price'],
+                alch_value=item['high_alch_value'],
+                roi_percent=item.get('roi_percent', 0),
+                trade_limit=item.get('limit', 0),
+                hourly_volume=item.get('recent_volume', 0),
+                members=item.get('members', True),
+                severity_score=severity_score,
+                lowest_low=item.get('five_min_lowest_buy', 0) or 0
+            )
+            events.append(event)
+
+        return events
+
     def get_alchemy_alerts(self, min_profit: int = 100, min_volume_imbalance: float = 2.0,
                         min_limit: int = None, min_volume: int = None):
         """

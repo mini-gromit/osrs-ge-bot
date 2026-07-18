@@ -16,7 +16,7 @@ from bot.notifications import UserNotificationManager
 from bot.converters import FlexibleChannelConverter
 from renderers import DiscordRenderer
 from scheduler import DataScheduler
-from notifications import AlertPolicy, JsonPreferenceStore
+from notifications import AlertPolicy, JsonPreferenceStore, NotificationQueue
 import config
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,9 @@ class OSRSAlchemyBot(commands.Bot):
             subscription_manager=self.notification_manager
         )
         self.alert_policy = AlertPolicy(self.preference_store)
+
+        # Initialize notification batching queue (uses config defaults)
+        self.notification_queue = NotificationQueue()
 
         self.channel_config = None
         self.last_update = None
@@ -105,6 +108,8 @@ class OSRSAlchemyBot(commands.Bot):
         '🌟': ('hot_items', 'Hot Items'),
         '🧪': ('all_alchs', 'All Alchs'),
         '🆓': ('f2p_alchs', 'F2P Alchs'),
+        '💥': ('crash_risk', 'Crash Risk Alerts'),
+        '📈': ('flipping_trend', 'Flipping Trends'),
         '🔕': (None,        'Unsubscribe'),
     }
 
@@ -162,6 +167,7 @@ class OSRSAlchemyBot(commands.Bot):
         if notif_type is None:
             removed = self.notification_manager.unsubscribe_user(user_id)
             if removed:
+                logger.info(f"User {user_id} unsubscribed from all notifications")
                 try:
                     await user.send(
                         "🔕 You've been unsubscribed from all alchemy alerts."
@@ -175,9 +181,10 @@ class OSRSAlchemyBot(commands.Bot):
         )
 
         if subscribed:
+            logger.info(f"User {user_id} subscribed to {notif_type}")
             try:
                 await user.send(
-                    f"✅ You're now subscribed to **{label}** alchemy alerts!"
+                    f"✅ You're now subscribed to **{label}** notifications!"
                 )
             except Exception as e:
                 logger.warning(f"Could not DM user {user_id}: {e}")
@@ -385,17 +392,133 @@ class OSRSAlchemyBot(commands.Bot):
                 except Exception:
                     pass
 
+    async def send_alchemy_event_notifications(self):
+        """
+        NEW PIPELINE: Process profitable alchemy alerts through unified pipeline.
+
+        Runs in parallel with legacy send_personal_notifications() during Phase 3.
+        Once validated, will replace legacy system.
+
+        Flow:
+        1. Generate ProfitableAlchemyEvent objects for all profitable items
+        2. Filter through AlertPolicy for each notification tier
+        3. Enqueue NotificationDecisions for batching
+        4. Send ready notifications (respects batching window)
+        """
+        try:
+            # Generate all profitable alchemy events
+            # Use min_profit=1 to capture everything, let policy filter by tier
+            all_events = self.calculator.get_profitable_alchemy_events(
+                min_profit=1,
+                max_items=500
+            )
+
+            if not all_events:
+                return
+
+            # Production log: event generation
+            logger.info(f"[NOTIFY] Generated {len(all_events)} alchemy events")
+
+            # Process each notification tier through AlertPolicy
+            notification_types = ['super_hot', 'hot_items', 'all_alchs', 'f2p_alchs']
+
+            for notif_type in notification_types:
+                # Filter events through AlertPolicy
+                # Policy handles: profit tier matching, severity, cooldowns, duplicates
+                notifications = self.alert_policy.filter_events(
+                    all_events,
+                    notif_type
+                )
+
+                if notifications:
+                    # Enqueue for batching (queue owns timing logic)
+                    self.notification_queue.enqueue_batch(notifications)
+
+            # Get ready notifications from queue
+            # Queue determines readiness based on batching window, batch size, priority
+            ready_notifications = self.notification_queue.get_ready_notifications()
+
+            if ready_notifications:
+                await self._send_ready_notifications_alchemy(ready_notifications)
+
+        except Exception as e:
+            logger.error(f"Error in alchemy event notifications: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    async def _send_ready_notifications_alchemy(
+        self,
+        ready_notifications: dict
+    ):
+        """
+        Send ready profitable alchemy notifications to users.
+
+        Separate from _send_ready_notifications to allow different rendering
+        during parallel operation phase.
+
+        Args:
+            ready_notifications: Dict mapping user_id to list of NotificationDecisions
+        """
+        from events import ProfitableAlchemyEvent
+        from renderers import DiscordRenderer
+
+        for user_id, notifications in ready_notifications.items():
+            try:
+                # Group notifications by type for better presentation
+                by_type = {}
+                for notification in notifications:
+                    notif_type = notification.notification_type
+                    if notif_type not in by_type:
+                        by_type[notif_type] = []
+                    by_type[notif_type].append(notification.event)
+
+                # Send one message per notification type
+                user = await self.fetch_user(user_id)
+                if not user:
+                    continue
+
+                for notif_type, events in by_type.items():
+                    # Determine title based on type
+                    title_map = {
+                        'super_hot': '🔥 Super Hot Alchemy Alert',
+                        'hot_items': '🌟 Hot Items Alert',
+                        'all_alchs': '🧪 All Alchs Alert',
+                        'f2p_alchs': '🆓 F2P Alchs Alert'
+                    }
+                    title = title_map.get(notif_type, '💰 Alchemy Alert')
+
+                    # Create embed
+                    embed = DiscordRenderer.create_profitable_alchemy_alert_embed(
+                        events,
+                        title
+                    )
+
+                    # Send DM
+                    await user.send(embed=embed)
+
+                # Production log: batch sent
+                total_count = sum(len(events) for events in by_type.values())
+                logger.info(
+                    f"[NOTIFY] Sent batch: "
+                    f"user={user_id}, "
+                    f"count={total_count}"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to send notification to user {user_id}: {e}")
+
     async def send_market_event_notifications(self):
         """
-        Send MarketEvent alerts to users via DM using AlertPolicy.
+        Process MarketEvent alerts through AlertPolicy and NotificationQueue.
 
-        Uses AlertPolicy layer to:
-        - Filter events by user severity thresholds
-        - Apply cooldowns (default 15 min per item per user)
-        - Suppress duplicates (same item/status within 5 min)
-        - Respect user notification preferences
+        Flow:
+        1. Fetch MarketEvents (crash risk, flipping trends)
+        2. Filter through AlertPolicy (severity, cooldowns, duplicates)
+        3. Enqueue NotificationDecisions for batching
+        4. Get ready notifications from queue (batching window: 60s)
+        5. Send batched or single notifications to users
 
-        Produces NotificationDecision objects consumed by Discord renderer.
+        Uses NotificationQueue for batching - queue owns timing logic.
         """
         try:
             # Fetch crash risk alerts
@@ -411,22 +534,11 @@ class OSRSAlchemyBot(commands.Bot):
                     'crash_risk'
                 )
 
-                # Send DMs to users who should be notified
-                for notif in notifications:
-                    try:
-                        user = await self.fetch_user(notif.user_id)
-                        if user:
-                            # Render notification using event data
-                            embed = DiscordRenderer.create_crash_risk_alert_embed(
-                                [notif.event],
-                                f"{'🔴' if notif.priority == 'high' else '🟡'} Alchemy Crash Risk Alert"
-                            )
-                            await user.send(embed=embed)
-                    except Exception as e:
-                        logger.debug(f"Failed to send crash risk DM to user {notif.user_id}: {e}")
+                # Enqueue for batching (queue owns timing)
+                self.notification_queue.enqueue_batch(notifications)
 
         except Exception as e:
-            logger.warning(f"Error sending crash risk notifications: {e}")
+            logger.warning(f"Error processing crash risk notifications: {e}")
 
         try:
             # Fetch flipping trend alerts
@@ -442,22 +554,117 @@ class OSRSAlchemyBot(commands.Bot):
                     'flipping_trend'
                 )
 
-                # Send DMs to users who should be notified
-                for notif in notifications:
-                    try:
-                        user = await self.fetch_user(notif.user_id)
-                        if user:
-                            # Render notification using event data
-                            embed = DiscordRenderer.create_flipping_trend_alert_embed(
-                                [notif.event],
-                                f"{'🔴' if notif.priority == 'high' else '🟡'} Market Trend Alert"
-                            )
-                            await user.send(embed=embed)
-                    except Exception as e:
-                        logger.debug(f"Failed to send trend DM to user {notif.user_id}: {e}")
+                # Enqueue for batching (queue owns timing)
+                self.notification_queue.enqueue_batch(notifications)
 
         except Exception as e:
-            logger.warning(f"Error sending flipping trend notifications: {e}")
+            logger.warning(f"Error processing flipping trend notifications: {e}")
+
+        # Get notifications ready for delivery (queue decides based on batching window)
+        ready_notifications = self.notification_queue.get_ready_notifications()
+
+        # Send ready notifications (batched or single)
+        await self._send_ready_notifications(ready_notifications)
+
+    async def _send_ready_notifications(self, ready_notifications: dict):
+        """
+        Send ready notifications to users via DM.
+
+        Handles both single and batched notifications.
+
+        Args:
+            ready_notifications: Dict mapping user_id to list of NotificationDecisions
+        """
+        for user_id, user_notifications in ready_notifications.items():
+            try:
+                user = await self.fetch_user(user_id)
+                if not user:
+                    continue
+
+                # Single notification - send normally
+                if len(user_notifications) == 1:
+                    await self._send_single_notification(user, user_notifications[0])
+                else:
+                    # Multiple notifications - send as batch
+                    await self._send_batched_notifications(user, user_notifications)
+
+            except Exception as e:
+                logger.debug(f"Failed to send notifications to user {user_id}: {e}")
+
+    async def _send_single_notification(self, user, notification):
+        """
+        Send a single notification to a user.
+
+        Args:
+            user: Discord user object
+            notification: NotificationDecision object
+        """
+        try:
+            # Determine emoji based on priority
+            if notification.priority == 'critical':
+                priority_emoji = '🚨'
+            elif notification.priority == 'high':
+                priority_emoji = '🔴'
+            elif notification.priority == 'medium':
+                priority_emoji = '🟡'
+            else:
+                priority_emoji = '🔵'
+
+            if notification.notification_type == 'crash_risk':
+                embed = DiscordRenderer.create_crash_risk_alert_embed(
+                    [notification.event],
+                    f"{priority_emoji} Alchemy Crash Risk Alert"
+                )
+            elif notification.notification_type == 'flipping_trend':
+                embed = DiscordRenderer.create_flipping_trend_alert_embed(
+                    [notification.event],
+                    f"{priority_emoji} Market Trend Alert"
+                )
+            else:
+                return
+
+            await user.send(embed=embed)
+
+        except Exception as e:
+            logger.debug(f"Failed to send single notification: {e}")
+
+    async def _send_batched_notifications(self, user, notifications):
+        """
+        Send multiple notifications as a batched digest to a user.
+
+        Args:
+            user: Discord user object
+            notifications: List of NotificationDecision objects
+        """
+        try:
+            # Group by notification type
+            crash_risk_events = [
+                n.event for n in notifications
+                if n.notification_type == 'crash_risk'
+            ]
+            trend_events = [
+                n.event for n in notifications
+                if n.notification_type == 'flipping_trend'
+            ]
+
+            # Send crash risk batch
+            if crash_risk_events:
+                embed = DiscordRenderer.create_crash_risk_alert_embed(
+                    crash_risk_events,
+                    f"🔔 Alchemy Alert Digest ({len(crash_risk_events)} items)"
+                )
+                await user.send(embed=embed)
+
+            # Send trend batch
+            if trend_events:
+                embed = DiscordRenderer.create_flipping_trend_alert_embed(
+                    trend_events,
+                    f"🔔 Market Alert Digest ({len(trend_events)} items)"
+                )
+                await user.send(embed=embed)
+
+        except Exception as e:
+            logger.debug(f"Failed to send batched notifications: {e}")
 
     async def send_market_event_alerts(self):
         """
@@ -585,9 +792,13 @@ class OSRSAlchemyBot(commands.Bot):
                 "f2p_alchs"
             )
 
+        # PHASE 3: Run both notification systems in parallel
         await self.send_personal_notifications(
             super_hot, hot_items, all_alchs, f2p_alchs
         )
+
+        # NEW: Event-based notification system (validation)
+        await self.send_alchemy_event_notifications()
 
         # Send MarketEvent alerts to dedicated alert channels
         await self.send_market_event_alerts()

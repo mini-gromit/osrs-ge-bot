@@ -116,7 +116,7 @@ class DiscordRenderer:
 
         lines = []
 
-        for i, item in enumerate(items[:15], 1):
+        for i, item in enumerate(items[:3], 1):
 
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=item.get("item_id"),
@@ -152,73 +152,6 @@ class DiscordRenderer:
 
         return embed
 
-    # @staticmethod
-    # def create_alchemy_embed(items: List[Dict], title: str, color: discord.Color) -> discord.Embed:
-    #     """
-    #     Create a compact Discord embed optimized for rapid trading decisions.
-
-    #     Layout: Trading Terminal (2 lines per item)
-    #     - Line 1: Rank, emoji, clickable name, star indicator
-    #     - Line 2: Profit • Buy price • 5m range • Volume
-
-    #     Args:
-    #         items: List of alchemy item dicts
-    #         title: Embed title
-    #         color: Discord color
-
-    #     Returns:
-    #         Discord embed
-    #     """
-    #     embed = discord.Embed(
-    #         title=title,
-    #         color=color,
-    #         timestamp=datetime.now()
-    #     )
-
-    #     if not items:
-    #         embed.description = "No items found."
-    #         return embed
-
-    #     for i, item in enumerate(items[:12], 1):  # Increased from 10 to 12
-    #         ge_url = DiscordRenderer.get_item_ge_tracker_url(
-    #             item_id=item.get('item_id'),
-    #             item_name=item.get('name')
-    #         )
-
-    #         # Member status as emoji (faster recognition than text)
-    #         member_emoji = "🏆" if item.get('members') else "💎"
-
-    #         # Star indicator for items at historical low
-    #         star = " ⭐" if item.get('is_at_five_min_low', False) else ""
-
-    #         # Format 5-minute price range (avg→lowest or just available)
-    #         price_range = DiscordRenderer.format_5m_price_range(
-    #             item.get('five_min_avg_low'),
-    #             item.get('five_min_lowest_buy')
-    #         )
-
-    #         # Format volume compactly (850, 2.4k, 18k)
-    #         volume = item.get('recent_volume', 0)
-    #         volume_str = DiscordRenderer.format_volume_compact(volume)
-
-    #         # Make field name clickable (removes URL from value)
-    #         field_name = f"{i}. [{member_emoji} {item['name']}]({ge_url}){star}"
-
-    #         # Compact value: profit • buy • 5m range • volume
-    #         field_value = (
-    #             f"{item['profit']:,} gp • "
-    #             f"Buy {item['buy_price']:,} • "
-    #             f"5m {price_range} • "
-    #             f"Vol {volume_str}/hr"
-    #         )
-
-    #         embed.add_field(
-    #             name=field_name,
-    #             value=field_value,
-    #             inline=True
-    #         )
-
-    #     return embed
 
     @staticmethod
     def create_notification_embed(items: List[Dict], title: str) -> discord.Embed:
@@ -238,12 +171,20 @@ class DiscordRenderer:
             timestamp=datetime.now()
         )
 
-        for item in items[:5]:
+        for item in items[:3]:
+            ge_url = DiscordRenderer.get_item_ge_tracker_url(
+                item_id=item.get("item_id"),
+                item_name=item.get("name"),
+            )
+
+            member = "🏆" if item.get("members") else "💎"
+
             embed.add_field(
-                name=item['name'],
+                name="​",  # No field name for personal notifications
                 value=(
-                    f"Profit: {item['profit']:,} gp\n"
-                    f"ROI: {item['roi_percent']:.1f}%"
+                    f"{member} [{item['name']}]({ge_url})\n"
+                    f"`+{item['profit']:,} gp` • "
+                    f"Buy `{item['buy_price']:,}`"
                 ),
                 inline=False
             )
@@ -406,4 +347,65 @@ class DiscordRenderer:
             )
 
         embed.set_footer(text=f"Total alerts: {len(alerts)}")
+        return embed
+
+    @staticmethod
+    def create_profitable_alchemy_alert_embed(
+        alerts: List['ProfitableAlchemyEvent'],
+        title: str = "💰 Profitable Alchemy Alert"
+    ) -> discord.Embed:
+        """
+        Create Discord embed for profitable alchemy alerts.
+
+        Reuses layout from create_alchemy_embed but accepts MarketEvent objects.
+
+        Args:
+            alerts: List of ProfitableAlchemyEvent objects
+            title: Embed title
+
+        Returns:
+            Discord Embed object
+        """
+        from events import ProfitableAlchemyEvent
+
+        embed = discord.Embed(
+            title=title,
+            color=discord.Color.gold(),
+            timestamp=datetime.now()
+        )
+
+        if not alerts:
+            embed.description = "No profitable items at this time."
+            return embed
+
+        # Limit to 10 items to fit embed limits
+        alerts = alerts[:10]
+
+        # Build compact item list
+        lines = []
+        for alert in alerts:
+            # Format: Name | Profit | Buy | ROI% | Limit
+            line = (
+                f"**{alert.name}**\n"
+                f"💰 {alert.profit:,}gp | "
+                f"Buy {alert.buy_price:,}gp | "
+                f"ROI {alert.roi_percent:.1f}% | "
+                f"Limit {alert.trade_limit}"
+            )
+
+            # Add F2P indicator
+            if not alert.members:
+                line += " 🆓"
+
+            # Add historical low if available
+            if alert.lowest_low > 0:
+                line += f"\n📉 5m Low: {alert.lowest_low:,}gp"
+
+            lines.append(line)
+
+        embed.description = "\n\n".join(lines)
+
+        # Footer with total count
+        embed.set_footer(text=f"Showing {len(alerts)} profitable items")
+
         return embed

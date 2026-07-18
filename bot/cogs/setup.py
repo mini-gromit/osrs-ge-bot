@@ -112,10 +112,14 @@ class SetupCog(commands.Cog, name="Setup"):
             title="🔔 Notification Subscriptions",
             description=(
                 "React below to subscribe to DM alerts.\n\n"
+                "**Alchemy Opportunities:**\n"
                 "🔥 **Super Hot** — profit >1,000gp\n"
                 "🌟 **Hot Items** — profit 450–999gp\n"
                 "🧪 **All Alchs** — any profitable alch\n"
-                "🆓 **F2P Alchs** — F2P profitable alchs only\n"
+                "🆓 **F2P Alchs** — F2P profitable alchs only\n\n"
+                "**Market Alerts:**\n"
+                "💥 **Crash Risk** — volume imbalance warnings\n"
+                "📈 **Flipping Trends** — market trend signals\n\n"
                 "🔕 **Unsubscribe** — remove all alerts"
             ),
             color=discord.Color.gold()
@@ -540,10 +544,14 @@ class ConfirmationView(discord.ui.View):
                     title="🔔 Notification Subscriptions",
                     description=(
                         "React below to subscribe to DM alerts.\n\n"
+                        "**Alchemy Opportunities:**\n"
                         "🔥 **Super Hot** — profit >1,000gp\n"
                         "🌟 **Hot Items** — profit 450–999gp\n"
                         "🧪 **All Alchs** — any profitable alch\n"
-                        "🆓 **F2P Alchs** — F2P profitable alchs only\n"
+                        "🆓 **F2P Alchs** — F2P profitable alchs only\n\n"
+                        "**Market Alerts:**\n"
+                        "💥 **Crash Risk** — volume imbalance warnings\n"
+                        "📈 **Flipping Trends** — market trend signals\n\n"
                         "🔕 **Unsubscribe** — remove all alerts"
                     ),
                     color=discord.Color.gold()

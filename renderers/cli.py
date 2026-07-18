@@ -88,7 +88,7 @@ class CLIRenderer:
         if all_opportunities:
             print("Top Opportunities:")
             print("-" * 70)
-            for opp in all_opportunities[:5]:
+            for opp in all_opportunities[:3]:
                 # Format as one-liner
                 type_tag = "[ALCH]" if opp['type'] == 'alchemy' else "[FLIP]"
                 print(f"{opp['name']:<25} {type_tag:<7} +{opp['profit']:>5,.0f} gp  {opp['roi']:>5.0f}% ROI  {opp['status']}")
