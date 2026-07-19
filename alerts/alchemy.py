@@ -130,11 +130,6 @@ def get_alchemy_crash_alerts(
 
             alerts.append(event)
 
-            logger.info(
-                f"Added alert for {item['name']}: "
-                f"{crash_analysis['status']}"
-            )
-
     logger.info(
         f"Generated {len(alerts)} alchemy crash alerts"
     )

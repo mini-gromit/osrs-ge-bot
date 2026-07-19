@@ -95,46 +95,6 @@ class SetupCog(commands.Cog, name="Setup"):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='create_optin')
-    async def create_optin(self, ctx):
-        """Create the opt-in message for notifications"""
-        if not self.bot.channel_config:
-            await ctx.send("❌ Run !setup first.")
-            return
-
-        channel = self.bot.get_channel(self.bot.channel_config.welcome_channel)
-
-        if not channel:
-            await ctx.send("❌ Welcome channel not set or not found.")
-            return
-
-        embed = discord.Embed(
-            title="🔔 Notification Subscriptions",
-            description=(
-                "React below to subscribe to DM alerts.\n\n"
-                "**Alchemy Opportunities:**\n"
-                "🔥 **Super Hot** — profit >1,000gp\n"
-                "🌟 **Hot Items** — profit 450–999gp\n"
-                "🧪 **All Alchs** — any profitable alch\n"
-                "🆓 **F2P Alchs** — F2P profitable alchs only\n\n"
-                "**Market Alerts:**\n"
-                "💥 **Crash Risk** — volume imbalance warnings\n"
-                "📈 **Flipping Trends** — market trend signals\n\n"
-                "🔕 **Unsubscribe** — remove all alerts"
-            ),
-            color=discord.Color.gold()
-        )
-
-        msg = await channel.send(embed=embed)
-
-        for emoji in self.bot.REACTION_MAP.keys():
-            await msg.add_reaction(emoji)
-
-        self.bot.opt_in_message_id = msg.id
-        await self.bot.save_channel_config()
-
-        await ctx.send("✅ Opt-in message created.")
-
     @commands.command(name='status')
     async def status_cmd(self, ctx):
         """Show bot status and configuration"""
@@ -535,58 +495,18 @@ class ConfirmationView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=None)
             return
 
-        # Auto-create opt-in message if welcome channel configured
-        optin_created = False
-        if self.setup_state.get('welcome_channel'):
-            try:
-                welcome_channel = self.setup_state['welcome_channel']
-                embed = discord.Embed(
-                    title="🔔 Notification Subscriptions",
-                    description=(
-                        "React below to subscribe to DM alerts.\n\n"
-                        "**Alchemy Opportunities:**\n"
-                        "🔥 **Super Hot** — profit >1,000gp\n"
-                        "🌟 **Hot Items** — profit 450–999gp\n"
-                        "🧪 **All Alchs** — any profitable alch\n"
-                        "🆓 **F2P Alchs** — F2P profitable alchs only\n\n"
-                        "**Market Alerts:**\n"
-                        "💥 **Crash Risk** — volume imbalance warnings\n"
-                        "📈 **Flipping Trends** — market trend signals\n\n"
-                        "🔕 **Unsubscribe** — remove all alerts"
-                    ),
-                    color=discord.Color.gold()
-                )
-
-                msg = await welcome_channel.send(embed=embed)
-
-                for emoji in self.bot.REACTION_MAP.keys():
-                    await msg.add_reaction(emoji)
-
-                self.bot.opt_in_message_id = msg.id
-                self.bot.channel_config.opt_in_message_id = msg.id
-                await self.bot.config_manager.save_config(self.bot.channel_config)
-                optin_created = True
-            except Exception as e:
-                # Non-fatal error, continue with setup
-                pass
-
         # Start monitoring
         await self.bot.start_monitoring()
 
         # Show success message
         embed = discord.Embed(
             title="✅ Setup Complete!",
-            description="Your bot is now configured and monitoring has started.",
+            description=(
+                "Your bot is now configured and monitoring has started.\n\n"
+                "Users can manage notification preferences using `/notifications`"
+            ),
             color=discord.Color.green()
         )
-
-        if optin_created:
-            welcome_channel = self.setup_state['welcome_channel']
-            embed.add_field(
-                name="📢 Opt-in Message Created",
-                value=f"Users can now subscribe to notifications in {welcome_channel.mention}",
-                inline=False
-            )
 
         # Add test button
         view = TestConfigView(self.bot, self.setup_state)

@@ -51,7 +51,6 @@ class OSRSAlchemyBot(commands.Bot):
         self.channel_config = None
         self.last_update = None
         self.is_monitoring = False
-        self.opt_in_message_id = None
 
         self.persistence_minutes = config.ALERT_PERSISTENCE_MINUTES
 
@@ -94,18 +93,6 @@ class OSRSAlchemyBot(commands.Bot):
 
         self.is_refreshing = False
 
-    # Emoji → (notification_type, display_label) mapping.
-    # Drives the opt-in embed, reaction list, handler, and DM confirmations.
-    REACTION_MAP = {
-        '🔥': ('super_hot', 'Super Hot Items'),
-        '🌟': ('hot_items', 'Hot Items'),
-        '🧪': ('all_alchs', 'All Alchs'),
-        '🆓': ('f2p_alchs', 'F2P Alchs'),
-        '💥': ('crash_risk', 'Crash Risk Alerts'),
-        '📈': ('flipping_trend', 'Flipping Trends'),
-        '🔕': (None,        'Unsubscribe'),
-    }
-
     async def on_ready(self):
         logger.info(f'{self.user} has connected to Discord!')
         logger.info(f'Bot is in {len(self.guilds)} guilds')
@@ -140,59 +127,6 @@ class OSRSAlchemyBot(commands.Bot):
         if self.channel_config:
             await self.start_monitoring()
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(
-        self,
-        payload: discord.RawReactionActionEvent
-    ):
-        if payload.message_id != self.opt_in_message_id:
-            return
-
-        if payload.user_id == self.user.id:
-            return
-
-        emoji = str(payload.emoji)
-        user_id = payload.user_id
-
-        if emoji not in self.REACTION_MAP:
-            return
-
-        notif_type, label = self.REACTION_MAP[emoji]
-
-        try:
-            user = await self.fetch_user(user_id)
-        except Exception as e:
-            logger.warning(f"Could not fetch user {user_id}: {e}")
-            return
-
-        if not user:
-            return
-
-        if notif_type is None:
-            removed = self.notification_manager.unsubscribe_user(user_id)
-            if removed:
-                logger.info(f"User {user_id} unsubscribed from all notifications")
-                try:
-                    await user.send(
-                        "🔕 You've been unsubscribed from all alchemy alerts."
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not DM user {user_id}: {e}")
-            return
-
-        subscribed = self.notification_manager.subscribe_user(
-            user_id, notif_type
-        )
-
-        if subscribed:
-            logger.info(f"User {user_id} subscribed to {notif_type}")
-            try:
-                await user.send(
-                    f"✅ You're now subscribed to **{label}** notifications!"
-                )
-            except Exception as e:
-                logger.warning(f"Could not DM user {user_id}: {e}")
-
     async def load_channel_config(self):
         """Load channel configuration using ConfigManager"""
         self.channel_config = self.config_manager.load_config()
@@ -202,7 +136,6 @@ class OSRSAlchemyBot(commands.Bot):
             self.super_hot_min_profit = self.config_manager.profit_thresholds.super_hot_min_profit
             self.all_alchs_min_profit = self.config_manager.profit_thresholds.all_alchs_min_profit
             self.f2p_alchs_min_profit = self.config_manager.profit_thresholds.f2p_alchs_min_profit
-            self.opt_in_message_id = self.channel_config.opt_in_message_id
             logger.info("Channel config loaded successfully.")
         else:
             logger.info("No channel config found.")
@@ -216,7 +149,6 @@ class OSRSAlchemyBot(commands.Bot):
         self.config_manager.profit_thresholds.super_hot_min_profit = self.super_hot_min_profit
         self.config_manager.profit_thresholds.all_alchs_min_profit = self.all_alchs_min_profit
         self.config_manager.profit_thresholds.f2p_alchs_min_profit = self.f2p_alchs_min_profit
-        self.channel_config.opt_in_message_id = self.opt_in_message_id
 
         self.config_manager.save_config(self.channel_config)
 
@@ -482,8 +414,6 @@ class OSRSAlchemyBot(commands.Bot):
                 for notif_type, events in by_type.items():
                     # Determine title based on type
                     title_map = {
-                        'super_hot': '🔥 Super Hot Alchemy Alert',
-                        'hot_items': '🌟 Hot Items Alert',
                         'all_alchs': '🧪 All Alchs Alert',
                         'f2p_alchs': '🆓 F2P Alchs Alert'
                     }
@@ -591,7 +521,7 @@ class OSRSAlchemyBot(commands.Bot):
                     await self._send_batched_notifications(user, user_notifications)
 
             except Exception as e:
-                logger.debug(f"Failed to send notifications to user {user_id}: {e}")
+                logger.error(f"Failed to send notifications to user {user_id}: {e}")
 
     async def _send_single_notification(self, user, notification):
         """
@@ -628,7 +558,7 @@ class OSRSAlchemyBot(commands.Bot):
             await user.send(embed=embed)
 
         except Exception as e:
-            logger.debug(f"Failed to send single notification: {e}")
+            logger.error(f"Failed to send single notification: {e}")
 
     async def _send_batched_notifications(self, user, notifications):
         """
@@ -666,7 +596,7 @@ class OSRSAlchemyBot(commands.Bot):
                 await user.send(embed=embed)
 
         except Exception as e:
-            logger.debug(f"Failed to send batched notifications: {e}")
+            logger.error(f"Failed to send batched notifications: {e}")
 
     async def send_market_event_alerts(self):
         """
