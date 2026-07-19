@@ -38,8 +38,8 @@ USE_FLIPPING_AVERAGES = True
 DEFAULT_HOT_ITEMS_MIN_PROFIT = 450
 DEFAULT_HOT_ITEMS_MAX_PROFIT = 999
 DEFAULT_SUPER_HOT_MIN_PROFIT = 1000
-DEFAULT_ALL_ALCHS_MIN_PROFIT = 1
-DEFAULT_F2P_ALCHS_MIN_PROFIT = 1
+DEFAULT_ALL_ALCHS_MIN_PROFIT = 600
+DEFAULT_F2P_ALCHS_MIN_PROFIT = 600
 
 # Super hot items filtering parameters
 SUPER_HOT_MAX_ITEMS = 10
@@ -86,11 +86,20 @@ PRIORITY_MEDIUM_THRESHOLD = 50    # >= 50 = medium priority
 
 # Default user notification preferences
 DEFAULT_MIN_SEVERITY = 50         # Default minimum severity threshold
-DEFAULT_COOLDOWN_MINUTES = 3     # Default cooldown between same-item notifications
+DEFAULT_COOLDOWN_MINUTES = 1     # Default cooldown between same-item notifications
+
+PERSONAL_ALCH_MIN_LIMIT = 20
+PERSONAL_ALCH_MIN_VOLUME = 50
+PERSONAL_ALCH_MAX_ROI = 250
+PERSONAL_ALCH_MAX_BUY_PRICE = None
 
 # Duplicate suppression and cleanup
-DUPLICATE_SUPPRESSION_MINUTES = 2  # Suppress duplicate events within this window
+DUPLICATE_SUPPRESSION_MINUTES = 1  # Suppress duplicate events within this window
 TRACKING_CLEANUP_HOURS = 1         # Clean old cooldown/duplicate tracking entries
+
+# Validation limits for /notifications command
+MAX_PROFIT_THRESHOLD = 100000      # Maximum allowed min_profit value (100k gp)
+MIN_PROFIT_THRESHOLD = 1           # Minimum allowed min_profit value (1 gp)
 
 # ============================================================================
 # DATA REFRESH INTERVALS (in seconds)

@@ -70,6 +70,32 @@ class PreferenceStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_user_min_profit(self, user_id: int, notification_type: str) -> int:
+        """
+        Get user's minimum profit threshold for alchemy notifications.
+
+        Args:
+            user_id: User ID
+            notification_type: Type of notification ('all_alchs' or 'f2p_alchs')
+
+        Returns:
+            Minimum profit threshold in gp
+        """
+        pass
+
+    @abstractmethod
+    def set_user_min_profit(self, user_id: int, notification_type: str, min_profit: int):
+        """
+        Set user's minimum profit threshold for alchemy notifications.
+
+        Args:
+            user_id: User ID
+            notification_type: Type of notification ('all_alchs' or 'f2p_alchs')
+            min_profit: Minimum profit threshold in gp
+        """
+        pass
+
 
 class JsonPreferenceStore(PreferenceStore):
     """
@@ -80,11 +106,30 @@ class JsonPreferenceStore(PreferenceStore):
     changing AlertPolicy code.
     """
 
-    # Profit tier definitions - maps notification types to profit ranges
+    # Default preferences for personal notifications
+    # Public channel tiers (super_hot, hot_items) are not included here
+    DEFAULT_PREFERENCES = {
+        'all_alchs': {
+            'min_profit': config.DEFAULT_ALL_ALCHS_MIN_PROFIT
+        },
+        'f2p_alchs': {
+            'min_profit': config.DEFAULT_F2P_ALCHS_MIN_PROFIT
+        },
+        'crash_risk': {
+            'min_severity': config.DEFAULT_MIN_SEVERITY
+        },
+        'flipping_trend': {
+            'min_severity': config.DEFAULT_MIN_SEVERITY
+        }
+    }
+
+    # Legacy: Profit tier definitions for channel notifications only
+    # Kept for backward compatibility with get_profit_tier_config()
+    # Used by channel notification code, not personal notifications
     PROFIT_TIERS = {
         'super_hot': {
             'min_profit': config.DEFAULT_SUPER_HOT_MIN_PROFIT,
-            'max_profit': None,  # No upper limit
+            'max_profit': None,
             'f2p_only': False
         },
         'hot_items': {
@@ -100,19 +145,8 @@ class JsonPreferenceStore(PreferenceStore):
         'f2p_alchs': {
             'min_profit': config.DEFAULT_F2P_ALCHS_MIN_PROFIT,
             'max_profit': None,
-            'f2p_only': True     # Filter to F2P items
-        },
-        # Existing tiers for crash_risk/flipping_trend
-        'crash_risk': {
-            'min_profit': 100,
-            'max_profit': None,
-            'f2p_only': False
-        },
-        'flipping_trend': {
-            'min_profit': 1000,
-            'max_profit': None,
-            'f2p_only': False
-        },
+            'f2p_only': True
+        }
     }
 
     def __init__(
@@ -133,19 +167,76 @@ class JsonPreferenceStore(PreferenceStore):
         self.load_preferences()
 
     def load_preferences(self):
-        """Load user preferences from JSON file."""
+        """Load user preferences from JSON file with migration support."""
         try:
             if os.path.exists(self.filename):
                 with open(self.filename, 'r') as f:
                     data = json.load(f)
-                    self.preferences = {
-                        int(uid): prefs
-                        for uid, prefs in data.get('preferences', {}).items()
-                    }
+                    raw_prefs = data.get('preferences', {})
+                    self.preferences = {}
+
+                    for uid, prefs in raw_prefs.items():
+                        user_id = int(uid)
+                        self.preferences[user_id] = self._migrate_user_preferences(prefs)
+
                 logger.debug(f"Loaded preferences for {len(self.preferences)} users")
         except Exception as e:
             logger.error(f"Error loading preferences: {e}")
             self.preferences = {}
+
+    def _migrate_user_preferences(self, prefs: Dict) -> Dict:
+        """
+        Migrate user preferences from flat format to grouped format.
+
+        Old format: {"all_alchs_min_profit": 500, "crash_risk_min_severity": 60}
+        New format: {"all_alchs": {"min_profit": 500}, "crash_risk": {"min_severity": 60}}
+
+        Args:
+            prefs: User preferences dict (may be old or new format)
+
+        Returns:
+            Preferences in new grouped format
+        """
+        migrated = {}
+
+        # Preserve cooldown_minutes at top level (global setting)
+        if 'cooldown_minutes' in prefs:
+            migrated['cooldown_minutes'] = prefs['cooldown_minutes']
+
+        # Check if already migrated (has grouped structure)
+        has_grouped = any(
+            isinstance(prefs.get(ntype), dict)
+            for ntype in self.DEFAULT_PREFERENCES.keys()
+        )
+
+        if has_grouped:
+            # Already in new format, copy grouped preferences
+            for ntype in self.DEFAULT_PREFERENCES.keys():
+                if ntype in prefs and isinstance(prefs[ntype], dict):
+                    migrated[ntype] = prefs[ntype]
+            return migrated
+
+        # Migrate from flat format
+        for ntype in self.DEFAULT_PREFERENCES.keys():
+            group = {}
+
+            # Migrate min_profit for alchemy notifications
+            if ntype in ['all_alchs', 'f2p_alchs']:
+                old_key = f'{ntype}_min_profit'
+                if old_key in prefs:
+                    group['min_profit'] = prefs[old_key]
+
+            # Migrate min_severity for other notification types
+            else:
+                old_key = f'{ntype}_min_severity'
+                if old_key in prefs:
+                    group['min_severity'] = prefs[old_key]
+
+            # Only add if we migrated something
+            if group:
+                migrated[ntype] = group
+
+        return migrated
 
     def save_preferences(self):
         """Save user preferences to JSON file."""
@@ -189,11 +280,20 @@ class JsonPreferenceStore(PreferenceStore):
         """
         Get user's minimum severity threshold.
 
+        Uses grouped preference structure.
+
         Default: 50 (medium severity)
         Range: 0-100
         """
         user_prefs = self.preferences.get(user_id, {})
-        return user_prefs.get(f'{notification_type}_min_severity', config.DEFAULT_MIN_SEVERITY)
+        ntype_prefs = user_prefs.get(notification_type, {})
+
+        if 'min_severity' in ntype_prefs:
+            return ntype_prefs['min_severity']
+
+        # Return default from DEFAULT_PREFERENCES
+        defaults = self.DEFAULT_PREFERENCES.get(notification_type, {})
+        return defaults.get('min_severity', config.DEFAULT_MIN_SEVERITY)
 
     def get_cooldown_minutes(self, user_id: int) -> int:
         """
@@ -208,13 +308,16 @@ class JsonPreferenceStore(PreferenceStore):
         """
         Set user's minimum severity threshold.
 
+        Uses grouped preference structure.
+
         Args:
             user_id: User ID
             notification_type: Type of notification
             severity: Minimum severity (0-100)
         """
         self.preferences.setdefault(user_id, {})
-        self.preferences[user_id][f'{notification_type}_min_severity'] = severity
+        self.preferences[user_id].setdefault(notification_type, {})
+        self.preferences[user_id][notification_type]['min_severity'] = severity
         self.save_preferences()
 
     def set_cooldown(self, user_id: int, minutes: int):
@@ -227,6 +330,47 @@ class JsonPreferenceStore(PreferenceStore):
         """
         self.preferences.setdefault(user_id, {})
         self.preferences[user_id]['cooldown_minutes'] = minutes
+        self.save_preferences()
+
+    def get_user_min_profit(self, user_id: int, notification_type: str) -> int:
+        """
+        Get user's minimum profit threshold for alchemy notifications.
+
+        For personal notifications only. Uses grouped preference structure.
+        Returns user-specific threshold if set, otherwise returns default.
+
+        Args:
+            user_id: User ID
+            notification_type: Type of notification ('all_alchs' or 'f2p_alchs')
+
+        Returns:
+            Minimum profit threshold in gp
+        """
+        user_prefs = self.preferences.get(user_id, {})
+        ntype_prefs = user_prefs.get(notification_type, {})
+
+        if 'min_profit' in ntype_prefs:
+            return ntype_prefs['min_profit']
+
+        # Return default from DEFAULT_PREFERENCES
+        defaults = self.DEFAULT_PREFERENCES.get(notification_type, {})
+        return defaults.get('min_profit', config.DEFAULT_ALL_ALCHS_MIN_PROFIT)
+
+    def set_user_min_profit(self, user_id: int, notification_type: str, min_profit: int):
+        """
+        Set user's minimum profit threshold for alchemy notifications.
+
+        For personal notifications only. Uses grouped preference structure.
+        Allows users to customize their profit thresholds independently.
+
+        Args:
+            user_id: User ID
+            notification_type: Type of notification ('all_alchs' or 'f2p_alchs')
+            min_profit: Minimum profit threshold in gp
+        """
+        self.preferences.setdefault(user_id, {})
+        self.preferences[user_id].setdefault(notification_type, {})
+        self.preferences[user_id][notification_type]['min_profit'] = min_profit
         self.save_preferences()
 
     def get_profit_tier_config(self, notification_type: str) -> Dict:

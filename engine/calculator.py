@@ -768,10 +768,10 @@ class OSRSAlchemyFlippingCalculator:
             min_profit,
             max_items,
             members_only,
-            None,  # max_buy_price
-            None,  # min_limit
-            None,  # min_volume
-            None   # max_roi
+            config.PERSONAL_ALCH_MAX_BUY_PRICE,
+            config.PERSONAL_ALCH_MIN_LIMIT,
+            config.PERSONAL_ALCH_MIN_VOLUME,
+            config.PERSONAL_ALCH_MAX_ROI,
         )
 
         # Wrap in MarketEvent objects

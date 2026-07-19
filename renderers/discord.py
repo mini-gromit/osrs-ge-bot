@@ -383,29 +383,31 @@ class DiscordRenderer:
 
         # Build compact item list
         lines = []
+
         for alert in alerts:
-            # Format: Name | Profit | Buy | ROI% | Limit
-            line = (
-                f"**{alert.name}**\n"
-                f"💰 {alert.profit:,}gp | "
-                f"Buy {alert.buy_price:,}gp | "
-                f"ROI {alert.roi_percent:.1f}% | "
-                f"Limit {alert.trade_limit}"
+            ge_url = DiscordRenderer.get_item_ge_tracker_url(
+                item_id=alert.item_id,
+                item_name=alert.name,
             )
 
-            # Add F2P indicator
-            if not alert.members:
-                line += " 🆓"
+            star = " ⭐" if getattr(alert, "is_at_five_min_low", False) else ""
 
-            # Add historical low if available
-            if alert.lowest_low > 0:
-                line += f"\n📉 5m Low: {alert.lowest_low:,}gp"
+            price_range = DiscordRenderer.format_5m_price_range(
+                getattr(alert, "five_min_avg_low", None),
+                getattr(alert, "lowest_low", None),
+            )
 
-            lines.append(line)
+            lines.append(
+                f"**[{alert.name}]({ge_url}){star}**\n"
+                f"`+{alert.profit:,} gp` • "
+                f"Buy `{alert.buy_price:,}` • "
+                f"5m `{price_range}`"
+            )
 
         embed.description = "\n\n".join(lines)
 
-        # Footer with total count
-        embed.set_footer(text=f"Showing {len(alerts)} profitable items")
+        embed.set_footer(
+            text="⭐ Current buy matches lowest 5m buy opportunity"
+        )
 
         return embed

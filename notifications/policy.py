@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from events import MarketEvent
 from .models import NotificationDecision
 from .preference_store import PreferenceStore
+from events import ProfitableAlchemyEvent
 import config
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,9 @@ class AlertPolicy:
             preference_store: PreferenceStore implementation (JSON, DB, etc.)
         """
         self.preferences = preference_store
-        self.cooldowns: Dict[tuple, datetime] = {}  # (user_id, item_id) -> last_sent
-        self.seen_recently: Dict[tuple, datetime] = {}  # (item_id, status) -> last_seen
+        self.cooldowns: Dict[tuple, datetime] = {}  # (user_id, notification_type, item_id) -> last_sent
+        self.seen_recently: Dict[tuple, datetime] = {}  # (user_id, notification_type, item_id, status) -> last_seen
+        self.rejection_log_counts: Dict[str, int] = {}  # notification_type -> count (for diagnostics)
 
     def should_notify_user(
         self,
@@ -66,51 +68,99 @@ class AlertPolicy:
         Returns:
             True if user should be notified, False otherwise
         """
-        from events import ProfitableAlchemyEvent
+        # Helper for diagnostic logging (limit 10 per cycle)
+        def _log_rejection(reason: str, details: dict = None):
+            if notification_type not in ['all_alchs', 'f2p_alchs']:
+                return
+            if not isinstance(event, ProfitableAlchemyEvent):
+                return
+
+            count = self.rejection_log_counts.get(notification_type, 0)
+            if count >= 100:
+                return
+
+            self.rejection_log_counts[notification_type] = count + 1
+
+            log_parts = [
+                f"[DIAG] Rejection #{count + 1}",
+                f"type={notification_type}",
+                f"user={user_id}",
+                f"item={event.name}",
+                f"profit={event.profit}",
+                f"members={event.members}",
+                f"reason={reason}"
+            ]
+
+            if details:
+                for k, v in details.items():
+                    log_parts.append(f"{k}={v}")
+
+            logger.info(" | ".join(log_parts))
 
         # Check subscription
         if not self.preferences.is_subscribed(user_id, notification_type):
+            _log_rejection("not_subscribed")
             return False
 
-        # Check severity threshold
-        user_min_severity = self.preferences.get_min_severity(user_id, notification_type)
-        if event.severity_score < user_min_severity:
-            return False
+        # Severity filtering applies only to non-alchemy alerts.
+        # Alchemy personal notifications are controlled by user profit threshold.
+        if not isinstance(event, ProfitableAlchemyEvent):
+            user_min_severity = self.preferences.get_min_severity(
+                user_id,
+                notification_type
+            )
 
-        # Profit-based tier filtering for ProfitableAlchemyEvent
+            if event.severity_score < user_min_severity:
+                return False
+
+        # Profit-based filtering for ProfitableAlchemyEvent
         if isinstance(event, ProfitableAlchemyEvent):
-            tier_config = self.preferences.get_profit_tier_config(notification_type)
+            # Personal notifications only support: all_alchs, f2p_alchs
+            # Reject legacy tier types (super_hot, hot_items) for personal notifications
+            if notification_type not in ['all_alchs', 'f2p_alchs']:
+                logger.warning(
+                    f"Personal notification type '{notification_type}' not supported "
+                    f"for alchemy events. Use 'all_alchs' or 'f2p_alchs' instead."
+                )
+                _log_rejection("unsupported_type")
+                return False
 
-            # Check minimum profit
-            min_profit = tier_config.get('min_profit', 0)
+            # Get user-specific minimum profit threshold
+            min_profit = self.preferences.get_user_min_profit(user_id, notification_type)
             if event.profit < min_profit:
+                _log_rejection("profit_too_low", {"user_min_profit": min_profit})
                 return False
 
-            # Check maximum profit (if specified)
-            max_profit = tier_config.get('max_profit')
-            if max_profit is not None and event.profit > max_profit:
-                return False
-
-            # Check F2P requirement
-            f2p_only = tier_config.get('f2p_only', False)
-            if f2p_only and event.members:
+            # Check F2P requirement for f2p_alchs
+            if notification_type == 'f2p_alchs' and event.members:
+                _log_rejection("members_item_for_f2p", {"user_min_profit": min_profit})
                 return False  # User wants F2P only, but this is members item
 
-        # Check cooldown (per-item, per-user)
-        cooldown_key = (user_id, event.item_id)
+        # Check cooldown (per-item, per-user, per-notification-type)
+        cooldown_key = (user_id, notification_type, event.item_id)
         if cooldown_key in self.cooldowns:
             cooldown_minutes = self.preferences.get_cooldown_minutes(user_id)
             time_since = datetime.now() - self.cooldowns[cooldown_key]
             if time_since < timedelta(minutes=cooldown_minutes):
+                remaining = cooldown_minutes - (time_since.total_seconds() / 60)
+                _log_rejection("cooldown", {
+                    "cooldown_minutes": cooldown_minutes,
+                    "remaining_minutes": f"{remaining:.1f}"
+                })
                 return False
 
-        # Check duplicate suppression (same item+status within window)
+        # Check duplicate suppression (same item+status within window, per-user, per-notification-type)
         # Use 'profitable' as status for ProfitableAlchemyEvent, otherwise use event.status
         status = getattr(event, 'status', 'profitable')
-        duplicate_key = (event.item_id, status)
+        duplicate_key = (user_id, notification_type, event.item_id, status)
         if duplicate_key in self.seen_recently:
             time_since = datetime.now() - self.seen_recently[duplicate_key]
             if time_since < timedelta(minutes=config.DUPLICATE_SUPPRESSION_MINUTES):
+                remaining = config.DUPLICATE_SUPPRESSION_MINUTES - (time_since.total_seconds() / 60)
+                _log_rejection("duplicate", {
+                    "suppression_window": config.DUPLICATE_SUPPRESSION_MINUTES,
+                    "remaining_minutes": f"{remaining:.1f}"
+                })
                 return False
 
         return True
@@ -135,6 +185,9 @@ class AlertPolicy:
         Returns:
             List of NotificationDecision objects ready for frontend delivery
         """
+        # Reset rejection log counter for this notification cycle
+        self.rejection_log_counts[notification_type] = 0
+
         notifications = []
 
         # Get all subscribed users for this notification type
@@ -144,11 +197,6 @@ class AlertPolicy:
             return notifications
 
         for event in events:
-            # Update duplicate tracking
-            status = getattr(event, 'status', 'profitable')
-            duplicate_key = (event.item_id, status)
-            self.seen_recently[duplicate_key] = datetime.now()
-
             for user_id in subscribed_users:
                 if self.should_notify_user(user_id, event, notification_type):
                     # Determine priority from severity score
@@ -170,8 +218,14 @@ class AlertPolicy:
 
                     notifications.append(notification)
 
-                    # Update cooldown
-                    self.cooldowns[(user_id, event.item_id)] = datetime.now()
+                    # Update cooldown (scoped by user, notification type, and item)
+                    cooldown_key = (user_id, notification_type, event.item_id)
+                    self.cooldowns[cooldown_key] = datetime.now()
+
+                    # Update duplicate tracking (scoped by user, notification type, item, and status)
+                    status = getattr(event, 'status', 'profitable')
+                    duplicate_key = (user_id, notification_type, event.item_id, status)
+                    self.seen_recently[duplicate_key] = datetime.now()
 
         # Clean old tracking entries
         self._cleanup_old_tracking()

@@ -60,13 +60,6 @@ class OSRSAlchemyBot(commands.Bot):
         self.all_alchs_min_profit = config.DEFAULT_ALL_ALCHS_MIN_PROFIT
         self.f2p_alchs_min_profit = config.DEFAULT_F2P_ALCHS_MIN_PROFIT
 
-        self.last_notification_items = {
-            'super_hot': [],
-            'hot_items': [],
-            'all_alchs': [],
-            'f2p_alchs': [],
-        }
-
         self.alchemy_message_cache = {
             'super_hot': {
                 'items': [],
@@ -119,8 +112,19 @@ class OSRSAlchemyBot(commands.Bot):
 
         # Sync slash commands
         try:
-            synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} slash command(s)")
+            # Check for development guild ID for instant command sync
+            dev_guild_id = os.getenv('DEV_GUILD_ID')
+
+            if dev_guild_id:
+                # Guild-specific sync for instant updates during development
+                guild = discord.Object(id=int(dev_guild_id))
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                logger.info(f"Synced {len(synced)} slash command(s) to guild {dev_guild_id} (instant)")
+            else:
+                # Global sync for production (takes up to 1 hour to propagate)
+                synced = await self.tree.sync()
+                logger.info(f"Synced {len(synced)} slash command(s) globally (may take up to 1 hour to appear)")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
 
@@ -313,8 +317,57 @@ class OSRSAlchemyBot(commands.Bot):
             if not item.get('members', True)
         ][:20]
 
-        return super_hot, hot_items, all_alchs, f2p_alchs
+        # Convert filtered items to events for personal notifications
+        # Reuses same quality-filtered data for both channels and DMs
+        alchemy_events = self._convert_items_to_events(all_profitable)
 
+        return super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events
+
+    def _convert_items_to_events(self, items):
+        """
+        Convert filtered alchemy item dicts to ProfitableAlchemyEvent objects.
+
+        Reuses already-filtered market data to avoid duplicate computation.
+        Ensures channel notifications and personal DMs use the same quality filters.
+
+        Args:
+            items: List of filtered alchemy item dicts
+
+        Returns:
+            List of ProfitableAlchemyEvent objects
+        """
+        from events import ProfitableAlchemyEvent
+
+        events = []
+        for item in items:
+            profit = item['profit']
+
+            # Calculate severity score based on profit tier
+            if profit >= self.super_hot_min_profit:
+                severity_score = config.SEVERITY_SUPER_HOT
+            elif profit >= self.hot_items_min_profit:
+                severity_score = config.SEVERITY_HOT_ITEMS
+            elif profit >= 100:
+                severity_score = config.SEVERITY_ALL_ALCHS_HIGH
+            else:
+                severity_score = config.SEVERITY_ALL_ALCHS_LOW
+
+            event = ProfitableAlchemyEvent(
+                name=item['name'],
+                item_id=item['item_id'],
+                profit=profit,
+                buy_price=item['buy_price'],
+                alch_value=item['high_alch_value'],
+                roi_percent=item.get('roi_percent', 0),
+                trade_limit=item.get('limit', 0),
+                hourly_volume=item.get('recent_volume', 0),
+                members=item.get('members', True),
+                severity_score=severity_score,
+                lowest_low=item.get('five_min_lowest_buy', 0) or 0
+            )
+            events.append(event)
+
+        return events
 
     async def get_or_create_persistent_message(
         self,
@@ -346,87 +399,36 @@ class OSRSAlchemyBot(commands.Bot):
 
         return msg
 
-    async def send_personal_notifications(
-        self,
-        super_hot,
-        hot_items,
-        all_alchs,
-        f2p_alchs
-    ):
-        notifications = {
-            'super_hot': (super_hot, "🔥 Super Hot Alchemy Alert!"),
-            'hot_items': (hot_items, "🌟 Hot Alchemy Alert!"),
-            'all_alchs': (all_alchs, "🧪 All Alchs Alert!"),
-            'f2p_alchs': (f2p_alchs, "🆓 F2P Alchs Alert!"),
-        }
-
-        for notif_type, (items, title) in notifications.items():
-            if not items:
-                continue
-
-            current_ids = {item['item_id'] for item in items}
-            old_ids = {
-                item['item_id']
-                for item in self.last_notification_items[notif_type]
-            }
-
-            if current_ids == old_ids:
-                continue
-
-            self.last_notification_items[notif_type] = items
-
-            subscribers = (
-                self.notification_manager.get_subscribers_for_type(notif_type)
-            )
-
-            if not subscribers:
-                continue
-
-            embed = DiscordRenderer.create_notification_embed(items, title)
-
-            for uid in subscribers:
-                try:
-                    user = await self.fetch_user(uid)
-                    if user:
-                        await user.send(embed=embed)
-                except Exception:
-                    pass
-
-    async def send_alchemy_event_notifications(self):
+    async def send_alchemy_event_notifications(self, alchemy_events):
         """
-        NEW PIPELINE: Process profitable alchemy alerts through unified pipeline.
-
-        Runs in parallel with legacy send_personal_notifications() during Phase 3.
-        Once validated, will replace legacy system.
+        Process profitable alchemy alerts through event-based notification pipeline.
 
         Flow:
-        1. Generate ProfitableAlchemyEvent objects for all profitable items
-        2. Filter through AlertPolicy for each notification tier
+        1. Receive filtered ProfitableAlchemyEvent objects (computed once by fetch_and_analyze)
+        2. Filter through AlertPolicy for personal notification types
         3. Enqueue NotificationDecisions for batching
         4. Send ready notifications (respects batching window)
+
+        Args:
+            alchemy_events: List of ProfitableAlchemyEvent objects (already quality-filtered)
         """
         try:
-            # Generate all profitable alchemy events
-            # Use min_profit=1 to capture everything, let policy filter by tier
-            all_events = self.calculator.get_profitable_alchemy_events(
-                min_profit=1,
-                max_items=500
-            )
-
-            if not all_events:
+            if not alchemy_events:
                 return
 
-            # Production log: event generation
-            logger.info(f"[NOTIFY] Generated {len(all_events)} alchemy events")
+            # Production log: event processing
+            logger.info(f"[NOTIFY] Processing {len(alchemy_events)} filtered alchemy events")
 
-            # Process each notification tier through AlertPolicy
-            notification_types = ['super_hot', 'hot_items', 'all_alchs', 'f2p_alchs']
+            # Process personal notification types through AlertPolicy
+            # Personal notifications: all_alchs, f2p_alchs only
+            # Channel notifications (super_hot, hot_items) handled separately
+            notification_types = ['all_alchs', 'f2p_alchs']
 
             for notif_type in notification_types:
                 # Filter events through AlertPolicy
-                # Policy handles: profit tier matching, severity, cooldowns, duplicates
+                # Policy handles: user thresholds, F2P filtering, cooldowns, duplicates
                 notifications = self.alert_policy.filter_events(
-                    all_events,
+                    alchemy_events,
                     notif_type
                 )
 
@@ -729,7 +731,8 @@ class OSRSAlchemyBot(commands.Bot):
         super_hot,
         hot_items,
         all_alchs,
-        f2p_alchs
+        f2p_alchs,
+        alchemy_events
     ):
         if not self.channel_config:
             return
@@ -792,13 +795,9 @@ class OSRSAlchemyBot(commands.Bot):
                 "f2p_alchs"
             )
 
-        # PHASE 3: Run both notification systems in parallel
-        await self.send_personal_notifications(
-            super_hot, hot_items, all_alchs, f2p_alchs
-        )
-
-        # NEW: Event-based notification system (validation)
-        await self.send_alchemy_event_notifications()
+        # Send personal DM notifications through event-based pipeline
+        # Reuses same filtered events as channel notifications
+        await self.send_alchemy_event_notifications(alchemy_events)
 
         # Send MarketEvent alerts to dedicated alert channels
         await self.send_market_event_alerts()
@@ -836,13 +835,13 @@ class OSRSAlchemyBot(commands.Bot):
     @tasks.loop(seconds=config.MONITORING_INTERVAL_SECONDS)
     async def monitor_prices_with_links(self):
         try:
-            super_hot, hot_items, all_alchs, f2p_alchs = (
+            super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = (
                 await self.fetch_and_analyze()
             )
 
             if super_hot is not None:
                 await self.send_updates_with_links(
-                    super_hot, hot_items, all_alchs, f2p_alchs
+                    super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events
                 )
                 self.last_update = datetime.now()
 
@@ -871,13 +870,13 @@ class OSRSAlchemyBot(commands.Bot):
             logger.info("Initial data loaded - running first update...")
 
         try:
-            super_hot, hot_items, all_alchs, f2p_alchs = (
+            super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = (
                 await self.fetch_and_analyze()
             )
 
             if super_hot is not None:
                 await self.send_updates_with_links(
-                    super_hot, hot_items, all_alchs, f2p_alchs
+                    super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events
                 )
                 self.last_update = datetime.now()
 
@@ -912,6 +911,7 @@ async def setup_bot():
     bot = OSRSAlchemyBot()
 
     await bot.load_extension('bot.cogs.setup')
+    await bot.load_extension('bot.cogs.notifications')
 
     bot.add_command(test_cmd)
 
