@@ -167,14 +167,28 @@ class CLIRenderer:
 
         if relevant_alerts:
             print(f"\n🚨 CRASH RISK FOR YOUR ITEMS ({len(relevant_alerts)} items):")
-            print("-" * 100)
-            print(f"{'Item':<26} | {'Profit':<8} | {'ROI':<5} | {'Status':<12} | {'Vol Ratio':<10} | {'Hourly Vol':<11} | {'Severity':<9} | {'Rec'}")
-            print("-" * 100)
+            print("-" * 110)
+            print(f"{'Item':<26} | {'Profit':<8} | {'ROI':<5} | {'Status':<12} | {'Vol Ratio':<10} | {'Conf':<6} | {'Hourly Vol':<11} | {'Sev':<9} | {'Rec'}")
+            print("-" * 110)
 
             for alert in relevant_alerts:
                 status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
                 rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
-                vol_spike_emoji = '📈' if alert.volume_spike else ''
+
+                # Volume spike with magnitude
+                if alert.volume_spike and alert.spike_magnitude > 1.0:
+                    vol_spike_emoji = f'📈{alert.spike_magnitude:.1f}x'
+                else:
+                    vol_spike_emoji = ''
+
+                # Confidence emoji
+                confidence_emoji = {
+                    'high': '🟢',
+                    'medium': '🟡',
+                    'low': '🟠',
+                    'very_low': '🔴'
+                }.get(alert.volume_confidence, '⚪')
+
                 member_tag = "[M]" if alert.members else "[F2P]"
 
                 print(f"{status_emoji} {alert.name[:20]:<20} {member_tag:<5} | "
@@ -182,6 +196,7 @@ class CLIRenderer:
                     f"{alert.roi_percent:>5.0f}% | "
                     f"{alert.status:<12} | "
                     f"{alert.volume_ratio:>8.1f}x | "
+                    f"{alert.volume_confidence[:3]:<3}{confidence_emoji:<3} | "
                     f"{alert.hourly_volume:>9,}{vol_spike_emoji:<2} | "
                     f"{alert.severity_score:>7}/100 | "
                     f"{rec_emoji} {alert.recommendation.upper()}")
@@ -191,16 +206,31 @@ class CLIRenderer:
 
         if other_alerts:
             print(f"\n📊 OTHER ALCHEMY CRASH RISKS ({len(other_alerts[:5])} of {len(other_alerts)}):")
-            print("-" * 90)
+            print("-" * 100)
 
             for alert in other_alerts[:5]:
                 status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
-                vol_spike_emoji = '📈' if alert.volume_spike else ''
+
+                # Volume spike with magnitude
+                if alert.volume_spike and alert.spike_magnitude > 1.0:
+                    vol_spike_emoji = f'📈{alert.spike_magnitude:.1f}x'
+                else:
+                    vol_spike_emoji = ''
+
+                # Confidence emoji
+                confidence_emoji = {
+                    'high': '🟢',
+                    'medium': '🟡',
+                    'low': '🟠',
+                    'very_low': '🔴'
+                }.get(alert.volume_confidence, '⚪')
+
                 member_tag = "[M]" if alert.members else "[F2P]"
                 print(f"{status_emoji} {alert.name[:25]:<25} {member_tag:<5} | "
                     f"Profit: {alert.profit:>6,.0f} | "
                     f"ROI: {alert.roi_percent:>4.0f}% | "
                     f"Vol Ratio: {alert.volume_ratio:>5.1f}x | "
+                    f"Conf: {alert.volume_confidence[:3]}{confidence_emoji} | "
                     f"Hourly Vol: {alert.hourly_volume:>7,}{vol_spike_emoji:<2} | "
                     f"Severity: {alert.severity_score:>2}/100")
 

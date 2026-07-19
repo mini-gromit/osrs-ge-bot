@@ -185,13 +185,33 @@ class OSRSAlchemyBot(commands.Bot):
         return cache['items']
 
     async def fetch_and_analyze(self):
+        """
+        Analyze market data and produce filtered results for channel updates.
+
+        Returns:
+            tuple: Always returns exactly 5 values:
+                - super_hot: List of top profitable items (or None if data not ready)
+                - hot_items: List of mid-tier profitable items (or None if data not ready)
+                - all_alchs: List of all profitable alchemy items (or None if data not ready)
+                - f2p_alchs: List of F2P profitable alchemy items (or None if data not ready)
+                - alchemy_events: List of ProfitableAlchemyEvent objects (or None if data not ready)
+
+            When market data is not ready, returns (None, None, None, None, None).
+            Callers must check if super_hot is None before using results.
+        """
         logger.info("Fetching data for analysis...")
 
         # Wait for initial data from background refresh task
         # Background task continuously refreshes market data independently
-        if not self.calculator.current_prices or not self.calculator.item_mapping:
-            logger.warning("Waiting for initial market data from background refresh task...")
-            return None, None, None, None
+        has_prices = bool(self.calculator.current_prices)
+        has_items = bool(self.calculator.item_mapping)
+
+        if not has_prices or not has_items:
+            logger.warning(
+                f"[MONITOR] Market data not ready yet "
+                f"(prices={has_prices}, items={has_items}) - skipping this cycle"
+            )
+            return None, None, None, None, None
 
         logger.info(
             f"Filtering: "
@@ -765,9 +785,17 @@ class OSRSAlchemyBot(commands.Bot):
     @tasks.loop(seconds=config.MONITORING_INTERVAL_SECONDS)
     async def monitor_prices_with_links(self):
         try:
-            super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = (
-                await self.fetch_and_analyze()
-            )
+            result = await self.fetch_and_analyze()
+
+            # Defensive validation: ensure we got 5-tuple
+            if not isinstance(result, tuple) or len(result) != 5:
+                logger.error(
+                    f"[MONITOR] fetch_and_analyze() returned invalid result: "
+                    f"expected 5-tuple, got {type(result).__name__} with length {len(result) if isinstance(result, tuple) else 'N/A'}"
+                )
+                return
+
+            super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = result
 
             if super_hot is not None:
                 await self.send_updates_with_links(
@@ -775,9 +803,14 @@ class OSRSAlchemyBot(commands.Bot):
                 )
                 self.last_update = datetime.now()
 
+        except ValueError as e:
+            logger.error(
+                f"[MONITOR] Tuple unpacking failed - fetch_and_analyze() return value mismatch: {e}",
+                exc_info=True
+            )
         except Exception as e:
             import traceback
-            logger.error(f"Error in monitor loop: {e}")
+            logger.error(f"[MONITOR] Unexpected error in monitor loop: {e}")
             logger.error(traceback.format_exc())
 
     async def start_monitoring(self):
@@ -825,12 +858,12 @@ class OSRSAlchemyBot(commands.Bot):
 async def test_cmd(ctx):
     bot = ctx.bot
 
-    super_hot, hot_items, all_alchs, f2p_alchs = (
+    super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = (
         await bot.fetch_and_analyze()
     )
 
     await bot.send_updates_with_links(
-        super_hot, hot_items, all_alchs, f2p_alchs
+        super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events
     )
 
     await ctx.send("✅ Test update complete.")

@@ -1,5 +1,22 @@
 import statistics
-from typing import Dict, List
+from typing import Dict, List, Optional
+from . import volume
+
+
+# Crash risk detection thresholds
+VOLUME_RATIO_EXTREME = 5.0    # 5x+ sell pressure vs buy pressure
+VOLUME_RATIO_HIGH = 3.0       # 3-5x sell pressure
+VOLUME_RATIO_MODERATE = 2.0   # 2-3x sell pressure
+
+# Crash risk scoring points
+SCORE_EXTREME_IMBALANCE = 30
+SCORE_HIGH_IMBALANCE = 20
+SCORE_MODERATE_IMBALANCE = 10
+SCORE_PRICE_DECLINE = 10
+
+# Crash status thresholds
+CRASH_THRESHOLD = 35  # "crashing" status
+RISK_THRESHOLD = 20   # "crash_risk" status
 
 
 def detect_pump_and_dump(history_prices: List[Dict], current_high: int, current_low: int) -> tuple:
@@ -113,17 +130,26 @@ def detect_pump_and_dump(history_prices: List[Dict], current_high: int, current_
         return False, 0, f"Analysis error: {str(e)}"
 
 
-def analyze_alchemy_crash_risk(item_id: int, five_min_data: Dict, volume_data: Dict) -> Dict:
+def analyze_alchemy_crash_risk(
+    item_id: int,
+    five_min_data: Dict,
+    volume_data: Dict,
+    current_prices: Dict
+) -> Dict:
     """
-    Simplified alchemy crash detection - when low price volume >> high price volume.
+    Alchemy crash detection based on volume imbalance and price decline.
+
+    Detects when sell pressure significantly exceeds buy pressure, indicating
+    a potential price crash where alchemy items can be bought below normal value.
 
     Args:
         item_id: Item ID to analyze
-        five_min_data: 5-minute data dictionary
+        five_min_data: 5-minute data dictionary (avgHighPrice, avgLowPrice, volumes)
         volume_data: Hourly volume data dictionary
+        current_prices: Current price data dictionary (high, low prices)
 
     Returns:
-        Dictionary with simple crash analysis for alchemy items
+        Dictionary with crash analysis including confidence metrics
     """
     result = {
         'status': 'stable',
@@ -134,7 +160,12 @@ def analyze_alchemy_crash_risk(item_id: int, five_min_data: Dict, volume_data: D
         'volume_spike': False,
         'severity_score': 0,
         'alert_percent': 0,
-        'recommendation': 'safe'
+        'recommendation': 'safe',
+        # New confidence fields
+        'volume_confidence': 'very_low',
+        'total_volume': 0,
+        'price_decline_percent': 0.0,
+        'spike_magnitude': 1.0
     }
 
     try:
@@ -144,49 +175,79 @@ def analyze_alchemy_crash_risk(item_id: int, five_min_data: Dict, volume_data: D
 
         high_vol = five_min_info.get('high_volume', 0)
         low_vol = five_min_info.get('low_volume', 0)
-
         hourly_vol = volume_data.get(item_id, 0)
 
         result['high_volume'] = high_vol
         result['low_volume'] = low_vol
         result['hourly_volume'] = hourly_vol
 
-        if hourly_vol > 0:
-            hourly_avg_5min = hourly_vol / 12
-            current_5min_total = high_vol + low_vol
+        # Calculate total volume and confidence
+        total_vol = high_vol + low_vol
+        result['total_volume'] = total_vol
+        result['volume_confidence'] = volume.calculate_volume_confidence(total_vol)
 
-            if current_5min_total > (hourly_avg_5min * 3):
-                result['volume_spike'] = True
+        # Calculate volume spike using shared module
+        spike_analysis = volume.calculate_volume_spike(total_vol, hourly_vol)
+        result['volume_spike'] = spike_analysis['is_spike']
+        result['spike_magnitude'] = spike_analysis['magnitude']
 
+        # Calculate volume ratio (sell pressure / buy pressure)
         if high_vol > 0:
             volume_ratio = low_vol / high_vol
             result['volume_ratio'] = round(volume_ratio, 1)
             result['alert_percent'] = round((volume_ratio - 1) * 100, 1)
         else:
+            # Insufficient data - no buy volume
             if low_vol > 0:
-                result['volume_ratio'] = 999
-                result['alert_percent'] = 999
+                # Don't use 999 - mark as insufficient data
+                result['volume_ratio'] = 0
+                result['alert_percent'] = 0
+                result['volume_confidence'] = 'very_low'
+                return result
             else:
+                # No volume at all
                 return result
 
+        # Calculate price decline percentage
+        current_price_info = current_prices.get(item_id, {})
+        current_low = current_price_info.get('low', 0)
+        five_min_low = five_min_info.get('avgLowPrice', current_low)
+
+        if five_min_low > 0 and current_low > 0:
+            price_decline = ((current_low - five_min_low) / five_min_low) * 100
+            result['price_decline_percent'] = round(price_decline, 2)
+        else:
+            result['price_decline_percent'] = 0.0
+
+        # Calculate base crash score using constants
         crash_score = 0
 
-        if result['volume_ratio'] >= 5.0:
-            crash_score += 30
-        elif result['volume_ratio'] >= 3.0:
-            crash_score += 20
-        elif result['volume_ratio'] >= 2.0:
-            crash_score += 10
+        if result['volume_ratio'] >= VOLUME_RATIO_EXTREME:
+            crash_score += SCORE_EXTREME_IMBALANCE
+        elif result['volume_ratio'] >= VOLUME_RATIO_HIGH:
+            crash_score += SCORE_HIGH_IMBALANCE
+        elif result['volume_ratio'] >= VOLUME_RATIO_MODERATE:
+            crash_score += SCORE_MODERATE_IMBALANCE
 
-        if result['volume_spike']:
-            crash_score += 15
+        # Add spike score from shared calculation
+        crash_score += spike_analysis['score']
 
-        result['severity_score'] = crash_score
+        # Boost score if price is actually declining
+        if result['price_decline_percent'] < -2.0:
+            crash_score += SCORE_PRICE_DECLINE
 
-        if crash_score >= 35:
+        # Apply confidence multiplier to reduce noise from low-volume items
+        confidence_multiplier = volume.calculate_confidence_multiplier(
+            result['volume_confidence']
+        )
+        adjusted_score = int(crash_score * confidence_multiplier)
+        result['severity_score'] = adjusted_score
+
+        # Assign status based on adjusted severity
+        if adjusted_score >= CRASH_THRESHOLD:
             result['status'] = 'crashing'
             result['recommendation'] = 'buy low'
-        elif crash_score >= 20:
+        elif adjusted_score >= RISK_THRESHOLD:
             result['status'] = 'crash_risk'
             result['recommendation'] = 'consider buying'
         else:

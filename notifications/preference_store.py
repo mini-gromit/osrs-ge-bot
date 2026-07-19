@@ -258,9 +258,24 @@ class JsonPreferenceStore(PreferenceStore):
         Delegates to UserNotificationManager if available, otherwise returns True.
         """
         if self.subscription_manager:
-            subscribed_users = self.subscription_manager.get_subscribers_for_type(
-                notification_type
+            subscribed_users = (
+                self.subscription_manager.get_subscribers_for_type(
+                    notification_type
+                )
             )
+
+            # logger.info(
+            #     "[DEBUG] %s subscribers=%s",
+            #     notification_type,
+            #     subscribed_users
+            # )
+
+            # logger.info(
+            #     "[DEBUG] user %s subscribed=%s",
+            #     user_id,
+            #     user_id in subscribed_users
+            # )
+
             return user_id in subscribed_users
         return True
 

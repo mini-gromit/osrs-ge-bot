@@ -705,15 +705,20 @@ class OSRSAlchemyFlippingCalculator:
 
     def analyze_alchemy_crash_risk(self, item_id: int) -> Dict:
         """
-        Simplified alchemy crash detection - when low price volume >> high price volume
+        Alchemy crash detection based on volume imbalance and price decline
 
         Args:
             item_id: Item ID to analyze
 
         Returns:
-            Dictionary with simple crash analysis for alchemy items
+            Dictionary with crash analysis including confidence metrics
         """
-        return risk.analyze_alchemy_crash_risk(item_id, self.five_min_data, self.volume_data)
+        return risk.analyze_alchemy_crash_risk(
+            item_id,
+            self.five_min_data,
+            self.volume_data,
+            self.current_prices
+        )
 
     def analyze_flipping_trend(self, item_id: int) -> Dict:
         """

@@ -36,6 +36,11 @@ class CrashRiskEvent(MarketEvent):
     severity_score: int
     hourly_volume: int
     volume_spike: bool
+    # Confidence and quality fields
+    volume_confidence: str
+    total_volume: int
+    price_decline_percent: float
+    spike_magnitude: float
     # Business context fields
     trade_limit: int
     roi_percent: float
@@ -61,6 +66,10 @@ class CrashRiskEvent(MarketEvent):
         severity_score: int,
         hourly_volume: int,
         volume_spike: bool,
+        volume_confidence: str,
+        total_volume: int,
+        price_decline_percent: float,
+        spike_magnitude: float,
         trade_limit: int,
         roi_percent: float,
         members: bool,
@@ -83,6 +92,10 @@ class CrashRiskEvent(MarketEvent):
         self.severity_score = severity_score
         self.hourly_volume = hourly_volume
         self.volume_spike = volume_spike
+        self.volume_confidence = volume_confidence
+        self.total_volume = total_volume
+        self.price_decline_percent = price_decline_percent
+        self.spike_magnitude = spike_magnitude
         self.trade_limit = trade_limit
         self.roi_percent = roi_percent
         self.members = members

@@ -192,22 +192,16 @@ class DiscordRenderer:
         return embed
 
     @staticmethod
-    def create_crash_risk_alert_embed(alerts: List[CrashRiskEvent], title: str = "🚨 Crash Risk Alerts") -> discord.Embed:
-        """
-        Create a Discord embed for crash risk alerts.
+    def create_crash_risk_alert_embed(
+        alerts: List[CrashRiskEvent],
+        title: str = "🚨 Crash Risk Alerts"
+    ) -> discord.Embed:
 
-        Args:
-            alerts: List of CrashRiskEvent objects
-            title: Embed title
-
-        Returns:
-            Discord embed
-        """
-        # Determine embed color based on severity
-        if any(alert.status == 'crashing' for alert in alerts):
-            color = discord.Color.red()
-        else:
-            color = discord.Color.orange()
+        color = (
+            discord.Color.red()
+            if any(a.status == "crashing" for a in alerts)
+            else discord.Color.orange()
+        )
 
         embed = discord.Embed(
             title=title,
@@ -216,70 +210,65 @@ class DiscordRenderer:
         )
 
         if not alerts:
-            embed.description = "✅ No crash risks detected"
+            embed.description = "No crash risks detected."
             return embed
 
-        for alert in alerts[:10]:
-            # Status emoji
-            status_emoji = '🔴' if alert.status == 'crashing' else '🟡'
+        lines = []
 
-            # Recommendation emoji
-            rec_emoji = '🔥' if alert.recommendation == 'buy low' else '⚠️'
+        for i, alert in enumerate(alerts[:5], 1):
 
-            # Members tag
-            member_tag = "[M]" if alert.members else "[F2P]"
-
-            # Get GE-Tracker URL
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
-                item_name=alert.name
+                item_name=alert.name,
             )
 
-            # Volume spike indicator
-            vol_spike_emoji = '📈' if alert.volume_spike else ''
+            member = "🏆" if alert.members else "💎"
 
-            # Build value sections
-            value_parts = [
-                f"[GE-Tracker]({ge_url})\n",
-                f"📊 **What's Happening**",
-                f"{alert.explanation}\n",
-                f"💰 **Profit Opportunity**",
-                f"{alert.impact_summary}\n",
-                f"⚠️ **Market Conditions**",
-                f"• Status: {alert.status.replace('_', ' ').title()}",
-                f"• Volume: {alert.hourly_volume:,}/hr {vol_spike_emoji}",
-                f"• Sell/Buy Ratio: {alert.volume_ratio:.1f}x",
-                f"• Severity: {alert.severity_score}/100\n",
-                f"👉 **Recommendation**",
-                f"{rec_emoji} {alert.recommendation.upper()}"
-            ]
+            # Confidence: emoji from volume quality, number from severity score
+            confidence_emoji = {
+                "high": "🟢",
+                "medium": "🟡",
+                "low": "🟠",
+                "very_low": "🔴",
+            }.get(alert.volume_confidence, "⚪")
+            confidence = f"{confidence_emoji}{alert.severity_score}"
 
-            embed.add_field(
-                name=f"{status_emoji} {alert.name} {member_tag}",
-                value="\n".join(value_parts),
-                inline=True
+            # Price movement: show direction with symbols
+            if alert.price_decline_percent < -0.1:
+                trend = f"▼{abs(alert.price_decline_percent):.1f}%"
+            elif alert.price_decline_percent > 0.1:
+                trend = f"▲{alert.price_decline_percent:.1f}%"
+            else:
+                trend = "—"
+
+            lines.append(
+                f"**{i}. {member} [{alert.name}]({ge_url})** "
+                f"`{alert.profit:,} gp` • "
+                f"Pressure `{alert.volume_ratio:.1f}x` • "
+                f"Trend `{trend}` • "
+                f"Vol `{DiscordRenderer.format_volume_compact(alert.hourly_volume)}/hr` • "
+                f"{confidence}"
             )
 
-        embed.set_footer(text=f"Total alerts: {len(alerts)}")
+        embed.description = "\n\n".join(lines)
+
+        embed.set_footer(
+            text="Pressure = sell/buy ratio • Trend = 5min price change • Color = data quality"
+        )
+
         return embed
-
+    
     @staticmethod
-    def create_flipping_trend_alert_embed(alerts: List[FlippingTrendEvent], title: str = "📊 Market Trend Alerts") -> discord.Embed:
-        """
-        Create a Discord embed for flipping trend alerts.
+    def create_flipping_trend_alert_embed(
+        alerts: List[FlippingTrendEvent],
+        title: str = "📈 Price Movement Alerts"
+    ) -> discord.Embed:
 
-        Args:
-            alerts: List of FlippingTrendEvent objects
-            title: Embed title
+        statuses = {a.status for a in alerts}
 
-        Returns:
-            Discord embed
-        """
-        # Determine color based on alert types
-        statuses = [alert.status for alert in alerts]
-        if 'surging' in statuses:
+        if "surging" in statuses:
             color = discord.Color.green()
-        elif 'crashing' in statuses:
+        elif "crashing" in statuses:
             color = discord.Color.red()
         else:
             color = discord.Color.orange()
@@ -291,64 +280,38 @@ class DiscordRenderer:
         )
 
         if not alerts:
-            embed.description = "✅ No significant market movements detected"
+            embed.description = "No significant market movement detected."
             return embed
 
-        for alert in alerts[:10]:
-            # Status emoji
-            status_emoji = {
-                'crashing': '🔴',
-                'crash_risk': '🟡',
-                'surging': '🟢',
-                'surge_risk': '🟠'
-            }.get(alert.status, '⚪')
+        lines = []
 
-            # Recommendation emoji
-            recommendation_emoji = {
-                'avoid': '❌',
-                'caution': '⚠️',
-                'opportunity': '💰',
-                'safe': '✅'
-            }.get(alert.recommendation, '❓')
+        for i, alert in enumerate(alerts[:5], 1):
 
-            # Members tag
-            member_tag = "[M]" if alert.members else "[F2P]"
-
-            # Get GE-Tracker URL
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
-                item_name=alert.name
+                item_name=alert.name,
             )
 
-            # Volume spike indicator
-            vol_spike_emoji = '📈' if alert.volume_spike else ''
+            member = "🏆" if alert.members else "💎"
 
-            # Build value sections
-            value_parts = [
-                f"[GE-Tracker]({ge_url})\n",
-                f"📊 **What's Happening**",
-                f"{alert.explanation}\n",
-                f"💰 **Flip Opportunity**",
-                f"{alert.impact_summary}\n",
-                f"⚠️ **Market Conditions**",
-                f"• Status: {alert.status.replace('_', ' ').title()}",
-                f"• Price Change: {alert.price_change_percent:+.1f}%",
-                f"• Volume: {alert.hourly_volume:,}/hr {vol_spike_emoji}",
-                f"• Buy/Sell: {alert.high_volume}/{alert.low_volume}",
-                f"• Severity: {alert.severity_score}/100\n",
-                f"👉 **Recommendation**",
-                f"{recommendation_emoji} {alert.recommendation.upper()}"
-            ]
+            direction = "📈" if alert.price_change_percent > 0 else "📉"
 
-            embed.add_field(
-                name=f"{status_emoji} {alert.name} {member_tag}",
-                value="\n".join(value_parts),
-                inline=True
+            lines.append(
+                f"**{i}. {member} [{alert.name}]({ge_url})** "
+                f"`{alert.margin:,} gp` • "
+                f"{direction} `{alert.price_change_percent:+.1f}%` • "
+                f"Margin `{alert.margin_percent:.1f}%` • "
+                f"Vol `{DiscordRenderer.format_volume_compact(alert.hourly_volume)}/hr`"
             )
 
-        embed.set_footer(text=f"Total alerts: {len(alerts)}")
+        embed.description = "\n\n".join(lines)
+
+        embed.set_footer(
+            text="Price movement • Flip margin • Hourly volume"
+        )
+
         return embed
-
+    
     @staticmethod
     def create_profitable_alchemy_alert_embed(
         alerts: List['ProfitableAlchemyEvent'],

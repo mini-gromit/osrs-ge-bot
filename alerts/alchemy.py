@@ -17,6 +17,9 @@ def get_alchemy_crash_alerts(
     """
     Get alchemy items with crash risk alerts.
 
+    Generates CrashRiskEvent objects for all items meeting basic criteria.
+    Filtering by confidence or severity belongs in the notification policy layer.
+
     Args:
         calculator: OSRSAlchemyFlippingCalculator instance
         min_profit: Minimum profit to consider alerting about
@@ -25,7 +28,7 @@ def get_alchemy_crash_alerts(
         min_volume: Minimum volume filter
 
     Returns:
-        List of CrashRiskEvent objects
+        List of CrashRiskEvent objects with confidence metadata
     """
     alerts = []
 
@@ -118,6 +121,11 @@ def get_alchemy_crash_alerts(
                 severity_score=crash_analysis.get("severity_score", 0),
                 hourly_volume=crash_analysis.get("hourly_volume", 0),
                 volume_spike=crash_analysis.get("volume_spike", False),
+                # Confidence and quality fields
+                volume_confidence=crash_analysis.get("volume_confidence", "very_low"),
+                total_volume=crash_analysis.get("total_volume", 0),
+                price_decline_percent=crash_analysis.get("price_decline_percent", 0.0),
+                spike_magnitude=crash_analysis.get("spike_magnitude", 1.0),
                 # Business context fields
                 trade_limit=item.get("limit", 0),
                 roi_percent=item.get("roi_percent", 0),
