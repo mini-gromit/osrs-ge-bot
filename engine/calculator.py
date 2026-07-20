@@ -8,6 +8,7 @@ import math
 
 from api.client import OSRSAPIClient
 from domain import alchemy, flipping, risk
+from domain.history import MarketHistory, MarketSnapshot
 from alerts import alchemy as alchemy_alerts, flipping as flipping_alerts
 import config
 
@@ -28,6 +29,11 @@ class OSRSAlchemyFlippingCalculator:
         self.flipping_history_periods = config.FLIPPING_HISTORY_PERIODS
 
         self.non_alchemizable_keywords = config.NON_ALCHEMIZABLE_KEYWORDS
+
+        # Rolling market history for crash risk analysis
+        # Dict[item_id, MarketHistory] containing timestamped snapshots
+        # Automatically expires snapshots older than ~60 minutes
+        self.market_history: Dict[int, MarketHistory] = {}
 
     def is_alchemizable(self, item_data: Dict) -> bool:
         """
@@ -254,6 +260,65 @@ class OSRSAlchemyFlippingCalculator:
 
         # Delegate to existing enrichment method (which calls API layer)
         return self.enrich_five_min_with_minimums(item_ids, lookback_periods)
+
+    def collect_market_snapshots(self) -> int:
+        """
+        Collect market snapshots from current data and add to rolling history.
+
+        Should be called after fetch_current_prices() and fetch_five_minute_data()
+        to capture the current market state for crash risk persistence analysis.
+
+        Creates a snapshot for each item with 5-minute data containing:
+        - Timestamp
+        - Current prices (low/high)
+        - Buy/sell volumes
+        - Volume ratio
+
+        Old snapshots (>60 minutes) are automatically expired.
+
+        Returns:
+            Number of snapshots collected
+        """
+        if not self.current_prices or not self.five_min_data:
+            logger.debug("Skipping snapshot collection - missing required data")
+            return 0
+
+        snapshot_count = 0
+        current_timestamp = int(time.time())
+
+        for item_id, five_min_info in self.five_min_data.items():
+            try:
+                # Extract volume and price data
+                buy_volume = five_min_info.get('high_volume', 0) or 0
+                sell_volume = five_min_info.get('low_volume', 0) or 0
+                avg_low = five_min_info.get('avg_low')
+                avg_high = five_min_info.get('high')
+
+                # Create snapshot
+                snapshot = MarketSnapshot(
+                    timestamp=current_timestamp,
+                    avg_low=avg_low,
+                    avg_high=avg_high,
+                    buy_volume=buy_volume,
+                    sell_volume=sell_volume
+                )
+
+                # Get or create market history for this item
+                if item_id not in self.market_history:
+                    self.market_history[item_id] = MarketHistory(max_snapshots=12)
+
+                # Add snapshot and expire old ones
+                self.market_history[item_id].add_snapshot(snapshot)
+                self.market_history[item_id].expire_old_snapshots(max_age_seconds=3900)
+
+                snapshot_count += 1
+
+            except Exception as e:
+                logger.warning(f"Error creating snapshot for item {item_id}: {e}")
+                continue
+
+        logger.debug(f"Collected {snapshot_count} market snapshots")
+        return snapshot_count
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
         """
@@ -717,7 +782,8 @@ class OSRSAlchemyFlippingCalculator:
             item_id,
             self.five_min_data,
             self.volume_data,
-            self.current_prices
+            self.current_prices,
+            market_history_data=self.market_history
         )
 
     def analyze_flipping_trend(self, item_id: int) -> Dict:

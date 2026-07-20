@@ -155,9 +155,9 @@ class CLIRenderer:
 
     @staticmethod
     def display_alchemy_crash_alerts(crash_alerts: List[CrashRiskEvent], profitable_item_ids: set):
-        """Display alchemy crash risk alerts"""
+        """Display crash risk alerts"""
         print("\n" + "=" * 70)
-        print("ALCHEMY CRASH RISK ALERTS")
+        print("CRASH RISK ALERTS")
         print("=" * 70)
 
         relevant_alerts = [alert for alert in crash_alerts
@@ -196,7 +196,7 @@ class CLIRenderer:
                     f"{alert.roi_percent:>5.0f}% | "
                     f"{alert.status:<12} | "
                     f"{alert.volume_ratio:>8.1f}x | "
-                    f"{alert.volume_confidence[:3]:<3}{confidence_emoji:<3} | "
+                    f"{alert.confidence_score:<3}{confidence_emoji:<3} | "
                     f"{alert.hourly_volume:>9,}{vol_spike_emoji:<2} | "
                     f"{alert.severity_score:>7}/100 | "
                     f"{rec_emoji} {alert.recommendation.upper()}")
@@ -205,7 +205,7 @@ class CLIRenderer:
             print("All your items show healthy volume balance")
 
         if other_alerts:
-            print(f"\n📊 OTHER ALCHEMY CRASH RISKS ({len(other_alerts[:5])} of {len(other_alerts)}):")
+            print(f"\n📊 OTHER CRASH RISKS ({len(other_alerts[:5])} of {len(other_alerts)}):")
             print("-" * 100)
 
             for alert in other_alerts[:5]:
@@ -230,7 +230,7 @@ class CLIRenderer:
                     f"Profit: {alert.profit:>6,.0f} | "
                     f"ROI: {alert.roi_percent:>4.0f}% | "
                     f"Vol Ratio: {alert.volume_ratio:>5.1f}x | "
-                    f"Conf: {alert.volume_confidence[:3]}{confidence_emoji} | "
+                    f"Conf: {alert.confidence_score}{confidence_emoji} | "
                     f"Hourly Vol: {alert.hourly_volume:>7,}{vol_spike_emoji:<2} | "
                     f"Severity: {alert.severity_score:>2}/100")
 

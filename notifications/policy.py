@@ -68,12 +68,12 @@ class AlertPolicy:
             True if user should be notified, False otherwise
         """
 
-        logger.info(
-            "[DEBUG] user=%s type=%s subscribed=%s",
-            user_id,
-            notification_type,
-            self.preferences.is_subscribed(user_id, notification_type)
-        )
+        # logger.info(
+        #     "[DEBUG] user=%s type=%s subscribed=%s",
+        #     user_id,
+        #     notification_type,
+        #     self.preferences.is_subscribed(user_id, notification_type)
+        # )
 
         # Check subscription
         if not self.preferences.is_subscribed(user_id, notification_type):

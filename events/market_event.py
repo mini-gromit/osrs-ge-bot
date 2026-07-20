@@ -1,6 +1,6 @@
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
 
 @dataclass
@@ -21,6 +21,8 @@ class MarketEvent:
 class CrashRiskEvent(MarketEvent):
     """
     Market event for items with crash risk based on volume imbalance.
+
+    Includes historical trend metrics for sustained crash detection.
     """
     name: str
     item_id: int
@@ -38,17 +40,25 @@ class CrashRiskEvent(MarketEvent):
     volume_spike: bool
     # Confidence and quality fields
     volume_confidence: str
+    confidence_score: int
     total_volume: int
-    price_decline_percent: float
+    price_decline_percent: Optional[float]
     spike_magnitude: float
+    # Historical trend metrics (Optional - require rolling history)
+    trend_15m: Optional[float] = None  # 3 windows
+    trend_30m: Optional[float] = None  # 6 windows
+    trend_60m: Optional[float] = None  # 12 windows
+    consecutive_down_windows: Optional[int] = None
+    persistent_sell_pressure: Optional[bool] = None
+    largest_drawdown: Optional[float] = None
     # Business context fields
-    trade_limit: int
-    roi_percent: float
-    members: bool
-    max_profit_per_limit: int
+    trade_limit: int = 0
+    roi_percent: float = 0.0
+    members: bool = False
+    max_profit_per_limit: int = 0
     # Explanation fields
-    explanation: str
-    impact_summary: str
+    explanation: str = ""
+    impact_summary: str = ""
 
     def __init__(
         self,
@@ -67,15 +77,23 @@ class CrashRiskEvent(MarketEvent):
         hourly_volume: int,
         volume_spike: bool,
         volume_confidence: str,
+        confidence_score: int,
         total_volume: int,
-        price_decline_percent: float,
+        price_decline_percent: Optional[float],
         spike_magnitude: float,
-        trade_limit: int,
-        roi_percent: float,
-        members: bool,
-        max_profit_per_limit: int,
-        explanation: str,
-        impact_summary: str,
+        trade_limit: int = 0,
+        roi_percent: float = 0.0,
+        members: bool = False,
+        max_profit_per_limit: int = 0,
+        explanation: str = "",
+        impact_summary: str = "",
+        # Historical trend metrics (optional)
+        trend_15m: Optional[float] = None,
+        trend_30m: Optional[float] = None,
+        trend_60m: Optional[float] = None,
+        consecutive_down_windows: Optional[int] = None,
+        persistent_sell_pressure: Optional[bool] = None,
+        largest_drawdown: Optional[float] = None,
     ):
         super().__init__(event_type="crash_risk")
         self.name = name
@@ -93,6 +111,7 @@ class CrashRiskEvent(MarketEvent):
         self.hourly_volume = hourly_volume
         self.volume_spike = volume_spike
         self.volume_confidence = volume_confidence
+        self.confidence_score = confidence_score
         self.total_volume = total_volume
         self.price_decline_percent = price_decline_percent
         self.spike_magnitude = spike_magnitude
@@ -102,18 +121,30 @@ class CrashRiskEvent(MarketEvent):
         self.max_profit_per_limit = max_profit_per_limit
         self.explanation = explanation
         self.impact_summary = impact_summary
+        # Historical trend metrics
+        self.trend_15m = trend_15m
+        self.trend_30m = trend_30m
+        self.trend_60m = trend_60m
+        self.consecutive_down_windows = consecutive_down_windows
+        self.persistent_sell_pressure = persistent_sell_pressure
+        self.largest_drawdown = largest_drawdown
 
 
 @dataclass
 class FlippingTrendEvent(MarketEvent):
     """
-    Market event for flipping trend alerts.
+    Market event for flipping trend alerts with realistic profit calculations.
+
+    Includes GE tax calculation (2% of sell price) to show actionable net profit.
     """
     name: str
     item_id: int
     buy_price: int
     sell_price: int
-    margin: int
+    margin: int  # Gross margin (sell_price - buy_price)
+    gross_margin: int  # Same as margin, kept for compatibility
+    estimated_tax: int  # floor(sell_price * 0.02)
+    net_profit: int  # gross_margin - estimated_tax
     status: str
     price_change_percent: float
     high_volume: int
@@ -137,6 +168,9 @@ class FlippingTrendEvent(MarketEvent):
         buy_price: int,
         sell_price: int,
         margin: int,
+        gross_margin: int,
+        estimated_tax: int,
+        net_profit: int,
         status: str,
         price_change_percent: float,
         high_volume: int,
@@ -157,6 +191,9 @@ class FlippingTrendEvent(MarketEvent):
         self.buy_price = buy_price
         self.sell_price = sell_price
         self.margin = margin
+        self.gross_margin = gross_margin
+        self.estimated_tax = estimated_tax
+        self.net_profit = net_profit
         self.status = status
         self.price_change_percent = price_change_percent
         self.high_volume = high_volume

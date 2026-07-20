@@ -1,5 +1,33 @@
 import statistics
-from typing import Dict, List
+import math
+from typing import Dict, List, Tuple
+
+
+def calculate_flip_profit(buy_price: int, sell_price: int) -> Tuple[int, int, int]:
+    """
+    Calculate realistic flip profit after Grand Exchange tax.
+
+    The GE charges a 2% tax on the sell price when an item is sold.
+    There is no tax when buying items.
+
+    Args:
+        buy_price: Price to buy at (instant buy, current low)
+        sell_price: Price to sell at (instant sell, current high)
+
+    Returns:
+        Tuple of (gross_margin, estimated_tax, net_profit)
+            - gross_margin: sell_price - buy_price
+            - estimated_tax: floor(sell_price * 0.02)
+            - net_profit: gross_margin - estimated_tax
+    """
+    if buy_price <= 0 or sell_price <= 0:
+        return (0, 0, 0)
+
+    gross_margin = sell_price - buy_price
+    estimated_tax = math.floor(sell_price * 0.02)
+    net_profit = gross_margin - estimated_tax
+
+    return (gross_margin, estimated_tax, net_profit)
 
 
 def calculate_flip_score(current_high_price: int, current_low_price: int,

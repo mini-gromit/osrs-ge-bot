@@ -565,7 +565,7 @@ class OSRSAlchemyBot(commands.Bot):
             if notification.notification_type == 'crash_risk':
                 embed = DiscordRenderer.create_crash_risk_alert_embed(
                     [notification.event],
-                    f"{priority_emoji} Alchemy Crash Risk Alert"
+                    f"{priority_emoji} Crash Risk Alert"
                 )
             elif notification.notification_type == 'flipping_trend':
                 embed = DiscordRenderer.create_flipping_trend_alert_embed(
@@ -603,7 +603,7 @@ class OSRSAlchemyBot(commands.Bot):
             if crash_risk_events:
                 embed = DiscordRenderer.create_crash_risk_alert_embed(
                     crash_risk_events,
-                    f"🔔 Alchemy Alert Digest ({len(crash_risk_events)} items)"
+                    f"🔔 Crash Alert Digest ({len(crash_risk_events)} items)"
                 )
                 await user.send(embed=embed)
 
@@ -639,7 +639,7 @@ class OSRSAlchemyBot(commands.Bot):
                 if crash_alerts:
                     embed = DiscordRenderer.create_crash_risk_alert_embed(
                         crash_alerts,
-                        "🚨 Alchemy Crash Risk Alerts"
+                        "🚨 Crash Risk Alerts"
                     )
 
                     await self.get_or_create_persistent_message(

@@ -1,6 +1,7 @@
 import statistics
 from typing import Dict, List, Optional
 from . import volume
+from . import confidence
 
 
 # Crash risk detection thresholds
@@ -134,7 +135,8 @@ def analyze_alchemy_crash_risk(
     item_id: int,
     five_min_data: Dict,
     volume_data: Dict,
-    current_prices: Dict
+    current_prices: Dict,
+    market_history_data: Dict = None
 ) -> Dict:
     """
     Alchemy crash detection based on volume imbalance and price decline.
@@ -142,14 +144,18 @@ def analyze_alchemy_crash_risk(
     Detects when sell pressure significantly exceeds buy pressure, indicating
     a potential price crash where alchemy items can be bought below normal value.
 
+    Enhanced with rolling historical analysis to distinguish sustained crashes
+    from temporary spikes.
+
     Args:
         item_id: Item ID to analyze
         five_min_data: 5-minute data dictionary (avgHighPrice, avgLowPrice, volumes)
         volume_data: Hourly volume data dictionary
         current_prices: Current price data dictionary (high, low prices)
+        market_history_data: Optional Dict[int, MarketHistory] for historical analysis
 
     Returns:
-        Dictionary with crash analysis including confidence metrics
+        Dictionary with crash analysis including confidence and trend metrics
     """
     result = {
         'status': 'stable',
@@ -161,11 +167,19 @@ def analyze_alchemy_crash_risk(
         'severity_score': 0,
         'alert_percent': 0,
         'recommendation': 'safe',
-        # New confidence fields
+        # Confidence fields
         'volume_confidence': 'very_low',
+        'confidence_score': 10,
         'total_volume': 0,
-        'price_decline_percent': 0.0,
-        'spike_magnitude': 1.0
+        'price_decline_percent': None,
+        'spike_magnitude': 1.0,
+        # Historical trend metrics (None if history unavailable)
+        'trend_15m': None,
+        'trend_30m': None,
+        'trend_60m': None,
+        'consecutive_down_windows': None,
+        'persistent_sell_pressure': None,
+        'largest_drawdown': None
     }
 
     try:
@@ -209,15 +223,22 @@ def analyze_alchemy_crash_risk(
                 return result
 
         # Calculate price decline percentage
-        current_price_info = current_prices.get(item_id, {})
+        # Note: current_prices uses string keys
+        # Note: five_min_data uses 'avg_low' key (set in engine/calculator.py:131)
+        current_price_info = current_prices.get(str(item_id), {})
         current_low = current_price_info.get('low', 0)
-        five_min_low = five_min_info.get('avgLowPrice', current_low)
+        five_min_low = five_min_info.get('avg_low', None)
 
-        if five_min_low > 0 and current_low > 0:
+        if five_min_low is None:
+            # No historical data available
+            result['price_decline_percent'] = None
+        elif current_low > 0 and five_min_low > 0:
+            # Calculate percentage change
             price_decline = ((current_low - five_min_low) / five_min_low) * 100
             result['price_decline_percent'] = round(price_decline, 2)
         else:
-            result['price_decline_percent'] = 0.0
+            # History exists but prices are invalid
+            result['price_decline_percent'] = None
 
         # Calculate base crash score using constants
         crash_score = 0
@@ -233,21 +254,61 @@ def analyze_alchemy_crash_risk(
         crash_score += spike_analysis['score']
 
         # Boost score if price is actually declining
-        if result['price_decline_percent'] < -2.0:
+        if result['price_decline_percent'] is not None and result['price_decline_percent'] < -2.0:
             crash_score += SCORE_PRICE_DECLINE
 
-        # Apply confidence multiplier to reduce noise from low-volume items
-        confidence_multiplier = volume.calculate_confidence_multiplier(
-            result['volume_confidence']
-        )
-        adjusted_score = int(crash_score * confidence_multiplier)
-        result['severity_score'] = adjusted_score
+        # Severity is independent of confidence
+        result['severity_score'] = crash_score
 
-        # Assign status based on adjusted severity
-        if adjusted_score >= CRASH_THRESHOLD:
+        # Get market history for this item if available
+        market_history = None
+        if market_history_data and item_id in market_history_data:
+            market_history = market_history_data[item_id]
+
+        # Calculate historical trend metrics if history available
+        if market_history and market_history.has_sufficient_history(min_windows=2):
+            from domain import history
+
+            # Calculate price trends over different time windows
+            result['trend_15m'] = history.calculate_price_trend(market_history, windows=3)
+            result['trend_30m'] = history.calculate_price_trend(market_history, windows=6)
+            result['trend_60m'] = history.calculate_price_trend(market_history, windows=12)
+
+            # Calculate persistence metrics
+            result['consecutive_down_windows'] = history.calculate_consecutive_down_windows(market_history)
+
+            is_persistent, consecutive_windows, avg_ratio = history.calculate_persistent_sell_pressure(
+                market_history,
+                min_ratio=2.0,
+                min_windows=3
+            )
+            result['persistent_sell_pressure'] = is_persistent
+
+            result['largest_drawdown'] = history.calculate_largest_drawdown(market_history)
+
+        # Calculate confidence score using multi-signal framework
+        # Use historical scoring if available, otherwise legacy scoring
+        result['confidence_score'] = confidence.calculate_crash_confidence_with_history(
+            market_history=market_history,
+            volume_confidence=result['volume_confidence'],
+            total_volume=total_vol,
+            high_volume=high_vol,
+            low_volume=low_vol,
+            volume_ratio=result['volume_ratio'],
+            volume_spike=result['volume_spike'],
+            spike_magnitude=result['spike_magnitude'],
+            price_decline_percent=result['price_decline_percent'],
+            current_hourly_volume=hourly_vol,
+            has_current_price=bool(current_price_info.get('low')),
+            has_five_min_history=bool(five_min_info),
+            has_volume_data=bool(hourly_vol)
+        )
+
+        # Assign status based on severity
+        if crash_score >= CRASH_THRESHOLD:
             result['status'] = 'crashing'
             result['recommendation'] = 'buy low'
-        elif adjusted_score >= RISK_THRESHOLD:
+        elif crash_score >= RISK_THRESHOLD:
             result['status'] = 'crash_risk'
             result['recommendation'] = 'consider buying'
         else:

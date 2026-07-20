@@ -7,6 +7,26 @@ from domain import risk
 logger = logging.getLogger(__name__)
 
 
+# Quality filter defaults
+# These ensure alerts are actionable and reduce noise from illiquid/low-value items
+
+# Minimum hourly volume for actionable trading
+# Rationale: Items with < 50/hr volume lack liquidity for reliable trading
+# Tradeoff: May filter niche items, but those are rarely actionable anyway
+DEFAULT_MIN_HOURLY_VOLUME = 50
+
+# Minimum trade limit for meaningful profit potential
+# Rationale: Very low limits (< 10) make total profit too small even with good margins
+# Tradeoff: May miss high-value items with low limits, but most are collectibles
+DEFAULT_MIN_TRADE_LIMIT = 10
+
+# Minimum confidence score to filter noise
+# Rationale: Confidence < 40 indicates poor data quality or conflicting signals
+# Tradeoff: May miss early signals, but significantly reduces false positives
+# Note: 40 filters out "very_low" confidence tier, keeps "low" and above
+DEFAULT_MIN_CONFIDENCE = 40
+
+
 def get_alchemy_crash_alerts(
     calculator,
     min_profit: int = 100,
@@ -123,8 +143,9 @@ def get_alchemy_crash_alerts(
                 volume_spike=crash_analysis.get("volume_spike", False),
                 # Confidence and quality fields
                 volume_confidence=crash_analysis.get("volume_confidence", "very_low"),
+                confidence_score=crash_analysis.get("confidence_score", 10),
                 total_volume=crash_analysis.get("total_volume", 0),
-                price_decline_percent=crash_analysis.get("price_decline_percent", 0.0),
+                price_decline_percent=crash_analysis.get("price_decline_percent", None),
                 spike_magnitude=crash_analysis.get("spike_magnitude", 1.0),
                 # Business context fields
                 trade_limit=item.get("limit", 0),
@@ -133,17 +154,59 @@ def get_alchemy_crash_alerts(
                 max_profit_per_limit=item.get("max_profit_per_limit", 0),
                 # Explanation fields
                 explanation=explanation,
-                impact_summary=impact_summary
+                impact_summary=impact_summary,
+                # Historical trend metrics (optional)
+                trend_15m=crash_analysis.get("trend_15m", None),
+                trend_30m=crash_analysis.get("trend_30m", None),
+                trend_60m=crash_analysis.get("trend_60m", None),
+                consecutive_down_windows=crash_analysis.get("consecutive_down_windows", None),
+                persistent_sell_pressure=crash_analysis.get("persistent_sell_pressure", None),
+                largest_drawdown=crash_analysis.get("largest_drawdown", None)
             )
+
+            # Apply quality filters to ensure actionable signals
+            if event.hourly_volume < DEFAULT_MIN_HOURLY_VOLUME:
+                # Skip: insufficient liquidity for reliable trading
+                continue
+
+            if event.trade_limit < DEFAULT_MIN_TRADE_LIMIT:
+                # Skip: trade limit too low for meaningful profit
+                continue
+
+            if event.confidence_score < DEFAULT_MIN_CONFIDENCE:
+                # Skip: poor signal quality (conflicting data or noise)
+                continue
 
             alerts.append(event)
 
     logger.info(
-        f"Generated {len(alerts)} alchemy crash alerts"
+        f"Generated {len(alerts)} crash alerts after quality filtering"
     )
 
+    # Sort by ranking score (severity × confidence / 100)
+    # This ranks high-quality signals (high severity + high confidence) above
+    # noisy extreme ratios (high severity + low confidence)
+    #
+    # Ranking is calculated inline here, NOT stored in the event.
+    # This keeps MarketEvents frontend-agnostic - different consumers can rank differently.
+    #
+    # Future ranking enhancements (TODO):
+    # - Incorporate liquidity factor (hourly_volume / trade_limit ratio)
+    # - Weight by persistence (when historical 5m windows become available)
+    # - Boost items with confirmed price decline
+    # - Consider profit potential (max_profit_per_limit)
+    # - Apply user-specific preferences (members vs F2P, profit thresholds)
+    #
+    # When historical persistence data is available:
+    # confidence_score will automatically increase for sustained pressure,
+    # which naturally improves ranking without changing this formula.
+    #
+    # Example current behavior:
+    #   Item A: severity=80, confidence=50 (sudden spike) → rank=40
+    #   Item B: severity=60, confidence=90 (persistent) → rank=54
+    #   → Item B ranks higher (better signal quality)
     alerts.sort(
-        key=lambda x: x.volume_ratio,
+        key=lambda x: (x.severity_score * x.confidence_score) // 100,
         reverse=True
     )
 

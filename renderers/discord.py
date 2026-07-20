@@ -215,7 +215,7 @@ class DiscordRenderer:
 
         lines = []
 
-        for i, alert in enumerate(alerts[:5], 1):
+        for i, alert in enumerate(alerts[:8], 1):
 
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
@@ -224,17 +224,18 @@ class DiscordRenderer:
 
             member = "🏆" if alert.members else "💎"
 
-            # Confidence: emoji from volume quality, number from severity score
+            # Confidence: emoji from volume quality, number from confidence score
             confidence_emoji = {
                 "high": "🟢",
                 "medium": "🟡",
                 "low": "🟠",
                 "very_low": "🔴",
             }.get(alert.volume_confidence, "⚪")
-            confidence = f"{confidence_emoji}{alert.severity_score}"
 
             # Price movement: show direction with symbols
-            if alert.price_decline_percent < -0.1:
+            if alert.price_decline_percent is None:
+                trend = "N/A"
+            elif alert.price_decline_percent < -0.1:
                 trend = f"▼{abs(alert.price_decline_percent):.1f}%"
             elif alert.price_decline_percent > 0.1:
                 trend = f"▲{alert.price_decline_percent:.1f}%"
@@ -244,16 +245,16 @@ class DiscordRenderer:
             lines.append(
                 f"**{i}. {member} [{alert.name}]({ge_url})** "
                 f"`{alert.profit:,} gp` • "
-                f"Pressure `{alert.volume_ratio:.1f}x` • "
+                f"Press `{alert.volume_ratio:.1f}x` • "
                 f"Trend `{trend}` • "
                 f"Vol `{DiscordRenderer.format_volume_compact(alert.hourly_volume)}/hr` • "
-                f"{confidence}"
+                f"Conf {confidence_emoji}{alert.confidence_score}"
             )
 
         embed.description = "\n\n".join(lines)
 
         embed.set_footer(
-            text="Pressure = sell/buy ratio • Trend = 5min price change • Color = data quality"
+            text="Press = sell/buy ratio • Trend = 5min price change • Conf = signal quality"
         )
 
         return embed
@@ -261,8 +262,17 @@ class DiscordRenderer:
     @staticmethod
     def create_flipping_trend_alert_embed(
         alerts: List[FlippingTrendEvent],
-        title: str = "📈 Price Movement Alerts"
+        title: str = "💰 Flipping Opportunities"
     ) -> discord.Embed:
+        """
+        Compact trading-terminal style flipping embed.
+
+        Shows actionable flipping opportunities with:
+        - Buy/sell prices
+        - Net profit after 2% GE tax
+        - Price trend direction
+        - Volume and liquidity
+        """
 
         statuses = {a.status for a in alerts}
 
@@ -271,7 +281,7 @@ class DiscordRenderer:
         elif "crashing" in statuses:
             color = discord.Color.red()
         else:
-            color = discord.Color.orange()
+            color = discord.Color.gold()
 
         embed = discord.Embed(
             title=title,
@@ -280,12 +290,13 @@ class DiscordRenderer:
         )
 
         if not alerts:
-            embed.description = "No significant market movement detected."
+            embed.description = "No actionable flipping opportunities at this time."
             return embed
 
         lines = []
 
-        for i, alert in enumerate(alerts[:5], 1):
+        # Limit to 8 items to fit Discord embed limits
+        for i, alert in enumerate(alerts[:8], 1):
 
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=alert.item_id,
@@ -294,20 +305,31 @@ class DiscordRenderer:
 
             member = "🏆" if alert.members else "💎"
 
-            direction = "📈" if alert.price_change_percent > 0 else "📉"
+            # Price trend: show direction with symbols
+            if alert.price_change_percent > 0.1:
+                trend = f"▲{alert.price_change_percent:.1f}%"
+            elif alert.price_change_percent < -0.1:
+                trend = f"▼{abs(alert.price_change_percent):.1f}%"
+            else:
+                trend = "—"
 
+            # Format volume
+            volume = DiscordRenderer.format_volume_compact(alert.hourly_volume)
+
+            # Compact two-line format
             lines.append(
                 f"**{i}. {member} [{alert.name}]({ge_url})** "
-                f"`{alert.margin:,} gp` • "
-                f"{direction} `{alert.price_change_percent:+.1f}%` • "
-                f"Margin `{alert.margin_percent:.1f}%` • "
-                f"Vol `{DiscordRenderer.format_volume_compact(alert.hourly_volume)}/hr`"
+                f"Buy `{alert.buy_price:,}` • "
+                f"Sell `{alert.sell_price:,}` • "
+                f"Net `{alert.net_profit:,} gp` • "
+                f"Trend `{trend}` • "
+                f"Vol `{volume}/hr`"
             )
 
         embed.description = "\n\n".join(lines)
 
         embed.set_footer(
-            text="Price movement • Flip margin • Hourly volume"
+            text="Net profit = gross margin - 2% GE tax • Sorted by net profit × liquidity"
         )
 
         return embed
