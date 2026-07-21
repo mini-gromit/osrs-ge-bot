@@ -30,6 +30,153 @@ def calculate_flip_profit(buy_price: int, sell_price: int) -> Tuple[int, int, in
     return (gross_margin, estimated_tax, net_profit)
 
 
+def calculate_capital_metrics(
+    buy_price: int,
+    net_profit: int,
+    trade_limit: int,
+    hourly_volume: int
+) -> Dict[str, float]:
+    """
+    Calculate capital efficiency metrics for flipping opportunities.
+
+    These metrics help evaluate the practicality and efficiency of flips
+    independent of absolute profit amounts.
+
+    Args:
+        buy_price: Capital required per item
+        net_profit: Net profit per item (after GE tax)
+        trade_limit: GE trade limit (4-hour period)
+        hourly_volume: Estimated hourly trading volume
+
+    Returns:
+        Dict containing:
+            - required_capital: Buy price (capital per item)
+            - profit_per_item: Net profit per flip
+            - profit_per_million: How much profit per 1M gp invested
+            - estimated_hourly_profit: Estimated profit per hour based on volume
+    """
+    if buy_price <= 0:
+        return {
+            'required_capital': 0,
+            'profit_per_item': net_profit,
+            'profit_per_million': 0.0,
+            'estimated_hourly_profit': 0
+        }
+
+    # Profit per million invested (capital efficiency)
+    profit_per_million = (net_profit / buy_price) * 1_000_000
+
+    # Estimate hourly profit potential
+    # Assumes you can flip at market volume rate, capped by trade limit per hour
+    max_flips_per_hour = trade_limit / 4  # Trade limit is per 4 hours
+    volume_constrained_flips = min(hourly_volume, max_flips_per_hour * 10)  # Conservative estimate
+    estimated_hourly_profit = net_profit * volume_constrained_flips
+
+    return {
+        'required_capital': buy_price,
+        'profit_per_item': net_profit,
+        'profit_per_million': profit_per_million,
+        'estimated_hourly_profit': int(estimated_hourly_profit)
+    }
+
+
+def analyze_spread_stability(
+    current_buy: int,
+    current_sell: int,
+    historical_data: List[Dict]
+) -> Dict[str, any]:
+    """
+    Analyze spread behavior over time using historical price data.
+
+    Determines whether the spread is stable, improving, shrinking, or volatile.
+    This helps identify sustainable flipping opportunities vs temporary arbitrage.
+
+    Args:
+        current_buy: Current buy price
+        current_sell: Current sell price
+        historical_data: List of historical 5-minute data points with high/low prices
+
+    Returns:
+        Dict containing:
+            - spread_status: 'stable', 'improving', 'shrinking', 'volatile', 'unknown'
+            - spread_volatility: Coefficient of variation (%) of historical spreads
+            - mean_spread: Average historical spread
+            - current_spread: Current spread amount
+            - spread_percentile: Where current spread ranks (0-100)
+    """
+    if not historical_data or len(historical_data) < 5:
+        return {
+            'spread_status': 'unknown',
+            'spread_volatility': 0.0,
+            'mean_spread': 0,
+            'current_spread': current_sell - current_buy,
+            'spread_percentile': 50.0
+        }
+
+    # Extract historical spreads
+    spreads = []
+    for data_point in historical_data:
+        high = data_point.get('avgHighPrice') or data_point.get('highPriceVolume', 0)
+        low = data_point.get('avgLowPrice') or data_point.get('lowPriceVolume', 0)
+        if high > 0 and low > 0:
+            spreads.append(high - low)
+
+    if len(spreads) < 5:
+        return {
+            'spread_status': 'unknown',
+            'spread_volatility': 0.0,
+            'mean_spread': 0,
+            'current_spread': current_sell - current_buy,
+            'spread_percentile': 50.0
+        }
+
+    current_spread = current_sell - current_buy
+    mean_spread = statistics.mean(spreads)
+
+    # Calculate spread volatility (coefficient of variation)
+    if mean_spread > 0:
+        spread_volatility = (statistics.stdev(spreads) / mean_spread) * 100
+    else:
+        spread_volatility = 0.0
+
+    # Determine spread percentile (where does current spread rank?)
+    spread_percentile = (sum(1 for s in spreads if s <= current_spread) / len(spreads)) * 100
+
+    # Analyze recent trend (last 10 data points vs earlier)
+    if len(spreads) >= 10:
+        recent_spreads = spreads[-10:]
+        earlier_spreads = spreads[:-10]
+
+        recent_mean = statistics.mean(recent_spreads)
+        earlier_mean = statistics.mean(earlier_spreads)
+
+        spread_change = ((recent_mean - earlier_mean) / earlier_mean) * 100 if earlier_mean > 0 else 0
+
+        # Classify spread status
+        if spread_volatility > 30:
+            spread_status = 'volatile'
+        elif abs(spread_change) < 5:
+            spread_status = 'stable'
+        elif spread_change > 5:
+            spread_status = 'improving'
+        else:
+            spread_status = 'shrinking'
+    else:
+        # Not enough data for trend analysis
+        if spread_volatility > 30:
+            spread_status = 'volatile'
+        else:
+            spread_status = 'stable'
+
+    return {
+        'spread_status': spread_status,
+        'spread_volatility': spread_volatility,
+        'mean_spread': int(mean_spread),
+        'current_spread': current_spread,
+        'spread_percentile': spread_percentile
+    }
+
+
 def calculate_flip_score(current_high_price: int, current_low_price: int,
                         volume: int, margin: int, limit: int, history_prices: List[Dict],
                         detect_pump_and_dump_func, base_score=0) -> tuple:

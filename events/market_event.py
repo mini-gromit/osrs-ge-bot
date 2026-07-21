@@ -157,9 +157,18 @@ class FlippingTrendEvent(MarketEvent):
     trade_limit: int
     members: bool
     margin_percent: float
+    # Capital efficiency metrics
+    required_capital: int = 0
+    profit_per_million: float = 0.0
+    estimated_hourly_profit: int = 0
+    # Spread intelligence
+    spread_status: str = 'unknown'
+    spread_volatility: float = 0.0
+    # Confidence metrics
+    confidence_score: int = 50
     # Explanation fields
-    explanation: str
-    impact_summary: str
+    explanation: str = ""
+    impact_summary: str = ""
 
     def __init__(
         self,
@@ -182,8 +191,17 @@ class FlippingTrendEvent(MarketEvent):
         trade_limit: int,
         members: bool,
         margin_percent: float,
-        explanation: str,
-        impact_summary: str,
+        explanation: str = "",
+        impact_summary: str = "",
+        # Capital efficiency metrics
+        required_capital: int = 0,
+        profit_per_million: float = 0.0,
+        estimated_hourly_profit: int = 0,
+        # Spread intelligence
+        spread_status: str = 'unknown',
+        spread_volatility: float = 0.0,
+        # Confidence metrics
+        confidence_score: int = 50,
     ):
         super().__init__(event_type="flipping_trend")
         self.name = name
@@ -207,6 +225,15 @@ class FlippingTrendEvent(MarketEvent):
         self.margin_percent = margin_percent
         self.explanation = explanation
         self.impact_summary = impact_summary
+        # Capital efficiency
+        self.required_capital = required_capital
+        self.profit_per_million = profit_per_million
+        self.estimated_hourly_profit = estimated_hourly_profit
+        # Spread intelligence
+        self.spread_status = spread_status
+        self.spread_volatility = spread_volatility
+        # Confidence
+        self.confidence_score = confidence_score
 
 
 @dataclass

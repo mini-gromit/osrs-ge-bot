@@ -523,3 +523,90 @@ def calculate_crash_confidence_with_history(
 
     # Round to integer 0-100
     return int(min(100, max(0, confidence_score)))
+
+
+def calculate_flipping_confidence(
+    hourly_volume: int,
+    spread_status: str,
+    spread_volatility: float,
+    data_completeness: int,
+    volume_consistency: float = 50.0
+) -> int:
+    """
+    Calculate confidence score for flipping opportunities.
+
+    Confidence represents how reliable the flipping opportunity is, independent
+    of profit potential. Higher confidence = more trustworthy, less risky.
+
+    Signal breakdown:
+    - Liquidity (35%): Can you actually trade at these prices?
+    - Spread stability (30%): Will the spread persist or disappear?
+    - Volume consistency (20%): Is volume reliable or sporadic?
+    - Data completeness (15%): How much data do we have?
+
+    Args:
+        hourly_volume: Estimated hourly trading volume
+        spread_status: 'stable', 'improving', 'shrinking', 'volatile', 'unknown'
+        spread_volatility: Coefficient of variation (%) of historical spreads
+        data_completeness: Data quality score (0-100)
+        volume_consistency: How consistent volume is over time (0-100)
+
+    Returns:
+        Confidence score 0-100
+    """
+    # Liquidity score (35%): Based on hourly volume
+    if hourly_volume >= 500:
+        liquidity_score = 100
+    elif hourly_volume >= 200:
+        liquidity_score = 80 + int((hourly_volume - 200) / 300 * 20)
+    elif hourly_volume >= 100:
+        liquidity_score = 60 + int((hourly_volume - 100) / 100 * 20)
+    elif hourly_volume >= 50:
+        liquidity_score = 40 + int((hourly_volume - 50) / 50 * 20)
+    elif hourly_volume >= 20:
+        liquidity_score = 20 + int((hourly_volume - 20) / 30 * 20)
+    else:
+        liquidity_score = int(max(10, hourly_volume / 20 * 20))
+
+    # Spread stability score (30%): Based on spread status and volatility
+    if spread_status == 'stable':
+        spread_score = 100
+    elif spread_status == 'improving':
+        spread_score = 90
+    elif spread_status == 'unknown':
+        # No historical data, neutral score
+        spread_score = 50
+    elif spread_status == 'shrinking':
+        spread_score = 40
+    elif spread_status == 'volatile':
+        spread_score = 20
+    else:
+        spread_score = 50
+
+    # Adjust based on volatility if we have historical data
+    if spread_volatility > 0:
+        if spread_volatility < 10:
+            # Very stable spread
+            spread_score = min(100, spread_score + 10)
+        elif spread_volatility > 30:
+            # Very volatile spread
+            spread_score = max(10, spread_score - 20)
+        elif spread_volatility > 20:
+            # Moderately volatile
+            spread_score = max(20, spread_score - 10)
+
+    # Volume consistency score (20%): Passed in or default to neutral
+    volume_consistency_score = int(min(100, max(0, volume_consistency)))
+
+    # Data completeness score (15%): Already 0-100
+    data_score = int(min(100, max(0, data_completeness)))
+
+    # Weighted combination
+    confidence = (
+        (liquidity_score * 35) +
+        (spread_score * 30) +
+        (volume_consistency_score * 20) +
+        (data_score * 15)
+    ) / 100
+
+    return int(min(100, max(0, confidence)))

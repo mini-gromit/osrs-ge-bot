@@ -122,3 +122,11 @@ LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # Default log level
 LOG_LEVEL = 'INFO'
+
+# ============================================================================
+# DEBUG FLAGS
+# ============================================================================
+
+# Enable detailed diagnostic logging for flipping alerts pipeline
+# Shows item counts after each filter stage, statistics, and top filtered items
+DEBUG_FLIPPING_FILTERS = False

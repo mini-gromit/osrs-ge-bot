@@ -234,7 +234,7 @@ class DiscordRenderer:
 
             # Price movement: show direction with symbols
             if alert.price_decline_percent is None:
-                trend = "N/A"
+                trend = "—"
             elif alert.price_decline_percent < -0.1:
                 trend = f"▼{abs(alert.price_decline_percent):.1f}%"
             elif alert.price_decline_percent > 0.1:
@@ -242,19 +242,24 @@ class DiscordRenderer:
             else:
                 trend = "—"
 
+            # Format buy price compactly
+            # buy_fmt = DiscordRenderer.format_volume_compact(alert.buy_price)
+            vol_fmt = DiscordRenderer.format_volume_compact(alert.hourly_volume)
+
             lines.append(
                 f"**{i}. {member} [{alert.name}]({ge_url})** "
                 f"`{alert.profit:,} gp` • "
+                f"Buy `{alert.buy_price}` • "
                 f"Press `{alert.volume_ratio:.1f}x` • "
-                f"Trend `{trend}` • "
-                f"Vol `{DiscordRenderer.format_volume_compact(alert.hourly_volume)}/hr` • "
-                f"Conf {confidence_emoji}{alert.confidence_score}"
+                f"{trend} • "
+                f"Vol `{vol_fmt}/hr` • "
+                f"{confidence_emoji}{alert.confidence_score}"
             )
 
         embed.description = "\n\n".join(lines)
 
         embed.set_footer(
-            text="Press = sell/buy ratio • Trend = 5min price change • Conf = signal quality"
+            text="Press = sell/buy ratio • Trend = 5min price change • Confidence color = volume quality"
         )
 
         return embed
@@ -313,23 +318,36 @@ class DiscordRenderer:
             else:
                 trend = "—"
 
-            # Format volume
-            volume = DiscordRenderer.format_volume_compact(alert.hourly_volume)
+            # Confidence: emoji based on confidence score
+            if alert.confidence_score >= 80:
+                confidence_emoji = "🟢"
+            elif alert.confidence_score >= 60:
+                confidence_emoji = "🟡"
+            elif alert.confidence_score >= 40:
+                confidence_emoji = "🟠"
+            else:
+                confidence_emoji = "🔴"
 
-            # Compact two-line format
+            # # Format prices compactly
+            # buy_fmt = DiscordRenderer.format_volume_compact(alert.buy_price)
+            # sell_fmt = DiscordRenderer.format_volume_compact(alert.sell_price)
+            vol_fmt = DiscordRenderer.format_volume_compact(alert.hourly_volume)
+
+            # Compact terminal format
             lines.append(
                 f"**{i}. {member} [{alert.name}]({ge_url})** "
-                f"Buy `{alert.buy_price:,}` • "
-                f"Sell `{alert.sell_price:,}` • "
-                f"Net `{alert.net_profit:,} gp` • "
-                f"Trend `{trend}` • "
-                f"Vol `{volume}/hr`"
+                f"`{alert.buy_price} → {alert.sell_price}` • "
+                f"`+{alert.net_profit:,} gp` • "
+                f"ROI `{alert.margin_percent:.1f}%` • "
+                f"{trend} • "
+                f"Vol `{vol_fmt}/hr` • "
+                f"{confidence_emoji}{alert.confidence_score}"
             )
 
         embed.description = "\n\n".join(lines)
 
         embed.set_footer(
-            text="Net profit = gross margin - 2% GE tax • Sorted by net profit × liquidity"
+            text="Net profit after 2% GE tax • Sorted by opportunity score • Confidence color = signal quality"
         )
 
         return embed

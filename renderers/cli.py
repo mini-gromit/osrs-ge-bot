@@ -79,7 +79,7 @@ class CLIRenderer:
             status_text = event.status.replace('_', ' ')
             all_opportunities.append({
                 'name': event.name,
-                'profit': event.margin,
+                'profit': event.net_profit,  # Net profit after GE tax
                 'roi': event.margin_percent,
                 'status': status_text,
                 'type': 'flip'
