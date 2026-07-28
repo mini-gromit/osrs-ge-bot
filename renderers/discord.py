@@ -2,7 +2,7 @@ import re
 import discord
 from datetime import datetime
 from typing import List, Dict, Optional
-from events import CrashRiskEvent, FlippingTrendEvent
+from events import CrashRiskEvent, FlippingTrendEvent, HistoricalAlchemyOpportunityEvent
 
 
 class DiscordRenderer:
@@ -116,7 +116,7 @@ class DiscordRenderer:
 
         lines = []
 
-        for i, item in enumerate(items[:3], 1):
+        for i, item in enumerate(items[:6], 1):
 
             ge_url = DiscordRenderer.get_item_ge_tracker_url(
                 item_id=item.get("item_id"),
@@ -411,6 +411,118 @@ class DiscordRenderer:
 
         embed.set_footer(
             text="⭐ Current buy matches lowest 5m buy opportunity"
+        )
+
+        return embed
+
+    @staticmethod
+    def create_best_seen_15m_embed(
+        members_events: List[HistoricalAlchemyOpportunityEvent],
+        f2p_events: List[HistoricalAlchemyOpportunityEvent],
+        title: str = "🔥 Best Seen (15m)"
+    ) -> discord.Embed:
+        """
+        Create Discord embed for best historical alchemy opportunities.
+
+        Shows the best buying opportunities observed during the last 15 minutes,
+        not just the current snapshot. Displays top 3 Members and top 3 F2P.
+
+        Args:
+            members_events: List of Members historical alchemy events
+            f2p_events: List of F2P historical alchemy events
+            title: Embed title
+
+        Returns:
+            Discord Embed object
+        """
+        embed = discord.Embed(
+            title=title,
+            color=discord.Color.gold(),
+            timestamp=datetime.now()
+        )
+
+        lines = []
+
+        # Members section
+        if members_events:
+            lines.append("**🏆 Members**")
+
+            for i, event in enumerate(members_events[:5], 1):
+                ge_url = DiscordRenderer.get_item_ge_tracker_url(
+                    item_id=event.item_id,
+                    item_name=event.name,
+                )
+
+                # Format values
+                best_buy_fmt = f"{event.best_buy_price:,}"
+                alch_value_fmt = f"{event.high_alch_value:,}"
+                volume_fmt = DiscordRenderer.format_volume_compact(
+                    event.hourly_volume
+                )
+
+                # Time since best price was seen
+                if event.minutes_since_seen == 0:
+                    time_fmt = "now"
+                elif event.minutes_since_seen == 1:
+                    time_fmt = "1m"
+                else:
+                    time_fmt = f"{event.minutes_since_seen}m"
+
+                lines.append(
+                    f"**{i}. [{event.name}]({ge_url})**"
+                    f"`+{event.best_profit:,}` • "
+                    f"`{best_buy_fmt} → {alch_value_fmt}` • "
+                    f"`{time_fmt}` • "
+                    f"`{volume_fmt}/hr`"
+                )
+
+        else:
+            lines.append("**🏆 Members**")
+            lines.append("No opportunities found")
+
+        lines.append("")
+
+        # F2P section
+        if f2p_events:
+            lines.append("**🪙 F2P**")
+
+            for i, event in enumerate(f2p_events[:5], 1):
+                ge_url = DiscordRenderer.get_item_ge_tracker_url(
+                    item_id=event.item_id,
+                    item_name=event.name,
+                )
+
+                # Format values
+                best_buy_fmt = f"{event.best_buy_price:,}"
+                alch_value_fmt = f"{event.high_alch_value:,}"
+                volume_fmt = DiscordRenderer.format_volume_compact(
+                    event.hourly_volume
+                )
+
+                # Time since best price was seen
+                if event.minutes_since_seen == 0:
+                    time_fmt = "now"
+                elif event.minutes_since_seen == 1:
+                    time_fmt = "1m"
+                else:
+                    time_fmt = f"{event.minutes_since_seen}m"
+
+                lines.append(
+                    f"**{i}. [{event.name}]({ge_url})**"
+                    f"`+{event.best_profit:,}` • "
+                    f"`{best_buy_fmt} → {alch_value_fmt}` • "
+                    f"`{time_fmt}` • "
+                    f"`{volume_fmt}/hr`"
+                )
+
+        else:
+            lines.append("**🪙 F2P**")
+            lines.append("No opportunities found")
+
+        embed.description = "\n\n".join(lines)
+
+        embed.set_footer(
+            text="Best buy prices observed in the last 15 minutes"
         )
 
         return embed

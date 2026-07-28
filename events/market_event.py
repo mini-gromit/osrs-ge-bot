@@ -275,3 +275,52 @@ class ProfitableAlchemyEvent(MarketEvent):
         self.members = members
         self.severity_score = severity_score
         self.lowest_low = lowest_low
+
+
+@dataclass
+class HistoricalAlchemyOpportunityEvent(MarketEvent):
+    """
+    Market event for historical alchemy opportunities (Best Seen 15m).
+
+    Represents the best buying opportunities observed during the last 15 minutes,
+    not just the current snapshot. This helps surface items that were recently
+    very profitable even if the current price has risen.
+    """
+    name: str
+    item_id: int
+    best_buy_price: int          # Lowest buy price seen in last 15 minutes
+    best_buy_timestamp: int      # Unix timestamp when best price was observed
+    current_buy_price: int       # Current buy price
+    high_alch_value: int         # High alchemy value
+    best_profit: int             # Profit using best_buy_price
+    trade_limit: int             # GE trade limit (4-hour period)
+    hourly_volume: int           # Trading volume per hour
+    minutes_since_seen: int      # Minutes since best price was observed
+    is_f2p: bool                 # True if F2P item
+
+    def __init__(
+        self,
+        name: str,
+        item_id: int,
+        best_buy_price: int,
+        best_buy_timestamp: int,
+        current_buy_price: int,
+        high_alch_value: int,
+        best_profit: int,
+        trade_limit: int,
+        hourly_volume: int,
+        minutes_since_seen: int,
+        is_f2p: bool
+    ):
+        super().__init__(event_type="historical_alchemy_opportunity")
+        self.name = name
+        self.item_id = item_id
+        self.best_buy_price = best_buy_price
+        self.best_buy_timestamp = best_buy_timestamp
+        self.current_buy_price = current_buy_price
+        self.high_alch_value = high_alch_value
+        self.best_profit = best_profit
+        self.trade_limit = trade_limit
+        self.hourly_volume = hourly_volume
+        self.minutes_since_seen = minutes_since_seen
+        self.is_f2p = is_f2p

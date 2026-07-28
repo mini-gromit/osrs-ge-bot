@@ -102,45 +102,45 @@ class SetupCog(commands.Cog, name="Setup"):
             await ctx.send("❌ Bot not configured yet. Run !setup first.")
             return
 
+        config = self.bot.channel_config
         embed = discord.Embed(
             title="🤖 Bot Status",
             color=discord.Color.green() if self.bot.is_monitoring else discord.Color.orange()
         )
 
-        config = self.bot.channel_config
         embed.add_field(
             name="Monitoring",
             value="🟢 Active" if self.bot.is_monitoring else "🔴 Inactive",
             inline=False
         )
 
+        # Show configured channels (dynamically from CHANNEL_TYPES)
         channels_text = []
-        if config.super_hot_items:
-            ch = self.bot.get_channel(config.super_hot_items)
-            channels_text.append(f"🔥 Super Hot → {ch.mention if ch else 'Not found'}")
-        if config.hot_items:
-            ch = self.bot.get_channel(config.hot_items)
-            channels_text.append(f"🌟 Hot Items → {ch.mention if ch else 'Not found'}")
-        if config.all_alchs:
-            ch = self.bot.get_channel(config.all_alchs)
-            channels_text.append(f"🧪 All Alchs → {ch.mention if ch else 'Not found'}")
-        if config.f2p_alchs:
-            ch = self.bot.get_channel(config.f2p_alchs)
-            channels_text.append(f"🆓 F2P Alchs → {ch.mention if ch else 'Not found'}")
+        for key, name, emoji, required, desc in self.CHANNEL_TYPES:
+            channel_id = getattr(config, key, None)
+            if channel_id:
+                ch = self.bot.get_channel(channel_id)
+                if ch:
+                    channels_text.append(f"{emoji} **{name}** → {ch.mention}")
+                else:
+                    channels_text.append(f"{emoji} **{name}** → ⚠️ Not found")
 
-        embed.add_field(
-            name="Configured Channels",
-            value="\n".join(channels_text) if channels_text else "None",
-            inline=False
-        )
+        if channels_text:
+            embed.add_field(
+                name="Configured Channels",
+                value="\n".join(channels_text),
+                inline=False
+            )
 
+        # Show subscriber count
         sub_count = len(self.bot.notification_manager.user_subscriptions)
         embed.add_field(
             name="Subscribers",
-            value=f"{sub_count} user(s)",
+            value=f"{sub_count} user(s) receiving DM notifications",
             inline=False
         )
 
+        # Show last update time
         if self.bot.last_update:
             embed.add_field(
                 name="Last Update",
@@ -156,13 +156,14 @@ class SetupCog(commands.Cog, name="Setup"):
 
     # Channel configuration types: (key, display_name, emoji, required, description)
     CHANNEL_TYPES: List[Tuple[str, str, str, bool, str]] = [
-        ('super_hot_items', 'Super Hot Items', '🔥', True, 'High-profit alchemy opportunities (>1,000 gp)'),
-        ('hot_items', 'Hot Items', '🌟', True, 'Good alchemy opportunities (450-999 gp)'),
+        ('super_hot_items', 'Super Hot Items', '🔥', False, 'High-profit alchemy opportunities (>1,000 gp)'),
+        ('hot_items', 'Hot Items', '🌟', False, 'Good alchemy opportunities (450-999 gp)'),
         ('welcome_channel', 'Welcome/Opt-in', '👋', False, 'Channel for user notification opt-ins'),
         ('all_alchs', 'All Alchemy Items', '🧪', False, 'All profitable alchemy items'),
         ('f2p_alchs', 'F2P Alchemy Items', '🆓', False, 'F2P-only profitable alchemy items'),
         ('crash_risk_alerts', 'Crash Risk Alerts', '📉', False, 'Market crash alerts for alchemy items'),
         ('flipping_trend_alerts', 'Flipping Trend Alerts', '📈', False, 'Flipping trend alerts'),
+        ('best_seen_15m', 'Best Seen (15m)', '⏱️', False, 'Best alchemy opportunities seen in last 15 minutes'),
     ]
 
     @app_commands.command(
@@ -480,6 +481,7 @@ class ConfirmationView(discord.ui.View):
             f2p_alchs=self.setup_state['f2p_alchs'].id if self.setup_state.get('f2p_alchs') else None,
             crash_risk_alerts=self.setup_state['crash_risk_alerts'].id if self.setup_state.get('crash_risk_alerts') else None,
             flipping_trend_alerts=self.setup_state['flipping_trend_alerts'].id if self.setup_state.get('flipping_trend_alerts') else None,
+            best_seen_15m=self.setup_state['best_seen_15m'].id if self.setup_state.get('best_seen_15m') else None,
         )
 
         # Save to bot and file

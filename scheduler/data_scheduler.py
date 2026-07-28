@@ -107,6 +107,11 @@ class DataScheduler:
         if success:
             self._last_fetch_times['current_prices'] = time.time()
             logger.debug("Current prices refreshed successfully")
+
+            # Collect price snapshots for generic history store
+            # This builds rolling history from current_prices (~4,400 items)
+            # with hybrid volume data from five_min_data when available
+            self.calculator.collect_price_snapshots()
         else:
             logger.warning("Failed to refresh current prices")
 
@@ -158,10 +163,6 @@ class DataScheduler:
         if success:
             self._last_fetch_times['five_minute_data'] = time.time()
             logger.debug("5-minute data refreshed successfully")
-
-            # Collect market snapshots for crash risk persistence analysis
-            # This happens automatically with every refresh, building rolling history
-            self.calculator.collect_market_snapshots()
 
             # Trigger enrichment workflow - engine handles candidate selection
             self.calculator.enrich_candidate_items_with_history()

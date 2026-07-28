@@ -1,8 +1,9 @@
-from .market_event import CrashRiskEvent, FlippingTrendEvent, MarketEvent, ProfitableAlchemyEvent
+from .market_event import CrashRiskEvent, FlippingTrendEvent, MarketEvent, ProfitableAlchemyEvent, HistoricalAlchemyOpportunityEvent
 
 __all__ = [
     'MarketEvent',
     'CrashRiskEvent',
     'FlippingTrendEvent',
-    'ProfitableAlchemyEvent'
+    'ProfitableAlchemyEvent',
+    'HistoricalAlchemyOpportunityEvent'
     ]

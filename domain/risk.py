@@ -136,7 +136,7 @@ def analyze_alchemy_crash_risk(
     five_min_data: Dict,
     volume_data: Dict,
     current_prices: Dict,
-    market_history_data: Dict = None
+    history_store = None
 ) -> Dict:
     """
     Alchemy crash detection based on volume imbalance and price decline.
@@ -152,7 +152,7 @@ def analyze_alchemy_crash_risk(
         five_min_data: 5-minute data dictionary (avgHighPrice, avgLowPrice, volumes)
         volume_data: Hourly volume data dictionary
         current_prices: Current price data dictionary (high, low prices)
-        market_history_data: Optional Dict[int, MarketHistory] for historical analysis
+        history_store: Optional HistoryStore for historical analysis
 
     Returns:
         Dictionary with crash analysis including confidence and trend metrics
@@ -261,35 +261,33 @@ def analyze_alchemy_crash_risk(
         result['severity_score'] = crash_score
 
         # Get market history for this item if available
-        market_history = None
-        if market_history_data and item_id in market_history_data:
-            market_history = market_history_data[item_id]
+        item_history = None
+        if history_store and history_store.has_history(item_id, min_snapshots=2):
+            item_history = history_store.get_history(item_id)
 
         # Calculate historical trend metrics if history available
-        if market_history and market_history.has_sufficient_history(min_windows=2):
-            from domain import history
+        if item_history is not None:
+            from domain import history_analysis
 
-            # Calculate price trends over different time windows
-            result['trend_15m'] = history.calculate_price_trend(market_history, windows=3)
-            result['trend_30m'] = history.calculate_price_trend(market_history, windows=6)
-            result['trend_60m'] = history.calculate_price_trend(market_history, windows=12)
+            result['trend_15m'] = history_analysis.calculate_price_trend_minutes(item_history, lookback_minutes=15)
+            result['trend_30m'] = history_analysis.calculate_price_trend_minutes(item_history, lookback_minutes=30)
+            result['trend_60m'] = history_analysis.calculate_price_trend_minutes(item_history, lookback_minutes=60)
 
-            # Calculate persistence metrics
-            result['consecutive_down_windows'] = history.calculate_consecutive_down_windows(market_history)
+            result['consecutive_down_windows'] = history_analysis.calculate_consecutive_down_windows(item_history)
 
-            is_persistent, consecutive_windows, avg_ratio = history.calculate_persistent_sell_pressure(
-                market_history,
+            is_persistent, consecutive_windows, avg_ratio = history_analysis.calculate_persistent_sell_pressure(
+                item_history,
                 min_ratio=2.0,
                 min_windows=3
             )
             result['persistent_sell_pressure'] = is_persistent
 
-            result['largest_drawdown'] = history.calculate_largest_drawdown(market_history)
+            result['largest_drawdown'] = history_analysis.calculate_largest_drawdown(item_history)
 
         # Calculate confidence score using multi-signal framework
         # Use historical scoring if available, otherwise legacy scoring
         result['confidence_score'] = confidence.calculate_crash_confidence_with_history(
-            market_history=market_history,
+            market_history=item_history,
             volume_confidence=result['volume_confidence'],
             total_volume=total_vol,
             high_volume=high_vol,
@@ -315,7 +313,10 @@ def analyze_alchemy_crash_risk(
             result['status'] = 'stable'
             result['recommendation'] = 'stable'
 
-    except Exception:
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Crash risk analysis failed: {e}", exc_info=True)
         result['status'] = 'error'
 
     return result

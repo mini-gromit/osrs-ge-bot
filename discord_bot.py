@@ -17,6 +17,7 @@ from bot.converters import FlexibleChannelConverter
 from renderers import DiscordRenderer
 from scheduler import DataScheduler
 from notifications import AlertPolicy, JsonPreferenceStore, NotificationQueue
+from alerts import history as history_alerts
 import config
 
 logger = logging.getLogger(__name__)
@@ -676,6 +677,35 @@ class OSRSAlchemyBot(commands.Bot):
             except Exception as e:
                 logger.warning(f"Error sending flipping trend alerts: {e}")
 
+        # Fetch best seen 15m historical opportunities if channel configured
+        if self.channel_config.best_seen_15m:
+            try:
+                best_seen_data = history_alerts.get_top_historical_opportunities(
+                    calculator=self.calculator,
+                    min_profit=100
+                )
+
+                members_events = best_seen_data['members']
+                f2p_events = best_seen_data['f2p']
+
+                # Only send if we have at least one opportunity
+                if members_events or f2p_events:
+                    embed = DiscordRenderer.create_best_seen_15m_embed(
+                        members_events,
+                        f2p_events,
+                        "🔥 Best Seen (15m)"
+                    )
+
+                    await self.get_or_create_persistent_message(
+                        self.channel_config.best_seen_15m,
+                        self.channel_config.best_seen_15m_message_id,
+                        embed,
+                        "best_seen_15m"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error sending best seen 15m alerts: {e}")
+
     async def send_updates_with_links(
         self,
         super_hot,
@@ -687,7 +717,7 @@ class OSRSAlchemyBot(commands.Bot):
         if not self.channel_config:
             return
 
-        if super_hot:
+        if super_hot and self.channel_config.super_hot_items:
             super_hot = self.merge_alchemy_items('super_hot', super_hot)
             embed = DiscordRenderer.create_alchemy_embed(
                 super_hot,
@@ -701,7 +731,7 @@ class OSRSAlchemyBot(commands.Bot):
                 "super_hot"
             )
 
-        if hot_items:
+        if hot_items and self.channel_config.hot_items:
             hot_items = self.merge_alchemy_items('hot_items', hot_items)
             embed = DiscordRenderer.create_alchemy_embed(
                 hot_items,

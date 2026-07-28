@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ChannelConfig:
     """Discord channel configuration"""
-    super_hot_items: int
-    hot_items: int
+    super_hot_items: Optional[int] = None
+    hot_items: Optional[int] = None
     welcome_channel: Optional[int] = None
     all_alchs: Optional[int] = None
     f2p_alchs: Optional[int] = None
     crash_risk_alerts: Optional[int] = None
     flipping_trend_alerts: Optional[int] = None
+    best_seen_15m: Optional[int] = None
 
     super_hot_message_id: Optional[int] = None
     hot_items_message_id: Optional[int] = None
@@ -25,6 +26,7 @@ class ChannelConfig:
     opt_in_message_id: Optional[int] = None
     crash_risk_message_id: Optional[int] = None
     flipping_trend_message_id: Optional[int] = None
+    best_seen_15m_message_id: Optional[int] = None
 
 
 @dataclass
@@ -61,13 +63,15 @@ class ConfigManager:
                 f2p_alchs=data.get('f2p_alchs'),
                 crash_risk_alerts=data.get('crash_risk_alerts'),
                 flipping_trend_alerts=data.get('flipping_trend_alerts'),
+                best_seen_15m=data.get('best_seen_15m'),
                 super_hot_message_id=data.get('super_hot_message_id'),
                 hot_items_message_id=data.get('hot_items_message_id'),
                 all_alchs_message_id=data.get('all_alchs_message_id'),
                 f2p_alchs_message_id=data.get('f2p_alchs_message_id'),
                 opt_in_message_id=data.get('opt_in_message_id'),
                 crash_risk_message_id=data.get('crash_risk_message_id'),
-                flipping_trend_message_id=data.get('flipping_trend_message_id')
+                flipping_trend_message_id=data.get('flipping_trend_message_id'),
+                best_seen_15m_message_id=data.get('best_seen_15m_message_id')
             )
 
             self.profit_thresholds = ProfitThresholds(
@@ -118,6 +122,8 @@ class ConfigManager:
                 self.channel_config.crash_risk_message_id = message_id
             elif category == 'flipping_trend':
                 self.channel_config.flipping_trend_message_id = message_id
+            elif category == 'best_seen_15m':
+                self.channel_config.best_seen_15m_message_id = message_id
             else:
                 return False
 

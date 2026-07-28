@@ -10,7 +10,24 @@ Confidence is calculated from multiple independent signals, each weighted differ
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from domain.history import MarketHistory
+    from history import MarketHistory
+
+
+def _has_sufficient_history(market_history, min_windows: int = 2) -> bool:
+    """
+    Check if market history has sufficient data.
+
+    Args:
+        market_history: history.MarketHistory from history subsystem
+        min_windows: Minimum required snapshots
+
+    Returns:
+        True if sufficient history exists
+    """
+    if market_history is None:
+        return False
+
+    return market_history.has_history(min_snapshots=min_windows)
 
 
 # Confidence signal weights (must sum to 100)
@@ -191,7 +208,7 @@ def calculate_historical_sell_pressure_score(
         Score 0-100
     """
     # Fallback: No history available, use current ratio only
-    if market_history is None or not market_history.has_sufficient_history(min_windows=2):
+    if not _has_sufficient_history(market_history, min_windows=2):
         # Use simple ratio-based scoring
         if current_ratio >= PRESSURE_RATIO_EXTREME:
             return 70  # Reduced from full score since no persistence data
@@ -202,10 +219,8 @@ def calculate_historical_sell_pressure_score(
         else:
             return 10
 
-    # Import here to avoid circular dependency
-    from domain.history import calculate_persistent_sell_pressure
-
     # Check for persistent sell pressure across history
+    from domain.history_analysis import calculate_persistent_sell_pressure
     is_persistent, consecutive_windows, avg_ratio = calculate_persistent_sell_pressure(
         market_history,
         min_ratio=PRESSURE_RATIO_MODERATE,
@@ -401,7 +416,7 @@ def calculate_crash_confidence(
     # Weighted combination
     confidence_score = (
         (volume_quality * WEIGHT_VOLUME_QUALITY) +
-        (persistence * WEIGHT_SELL_PRESSURE_PERSISTENCE) +
+        (persistence * WEIGHT_HISTORICAL_SELL_PRESSURE) +
         (price_confirmation * WEIGHT_PRICE_TREND_CONFIRMATION) +
         (data_completeness * WEIGHT_DATA_COMPLETENESS)
     ) / 100
@@ -458,10 +473,7 @@ def calculate_crash_confidence_with_history(
         Confidence score 0-100
     """
     # Check if we have sufficient history for new scoring
-    has_history = (
-        market_history is not None
-        and market_history.has_sufficient_history(min_windows=2)
-    )
+    has_history = _has_sufficient_history(market_history, min_windows=2)
 
     if not has_history:
         # Fall back to legacy scoring
@@ -478,9 +490,6 @@ def calculate_crash_confidence_with_history(
             has_five_min_history,
             has_volume_data
         )
-
-    # Import here to avoid circular dependency
-    from domain.history import calculate_liquidity_score
 
     # Calculate each signal component with historical data
     volume_quality = calculate_volume_quality_score(
@@ -500,6 +509,7 @@ def calculate_crash_confidence_with_history(
         price_decline_percent
     )
 
+    from domain.history_analysis import calculate_liquidity_score
     liquidity = calculate_liquidity_score(
         market_history,
         current_hourly_volume

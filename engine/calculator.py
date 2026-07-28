@@ -8,7 +8,7 @@ import math
 
 from api.client import OSRSAPIClient
 from domain import alchemy, flipping, risk
-from domain.history import MarketHistory, MarketSnapshot
+from history import HistoryStore, MarketSnapshot
 from alerts import alchemy as alchemy_alerts, flipping as flipping_alerts
 import config
 
@@ -30,10 +30,10 @@ class OSRSAlchemyFlippingCalculator:
 
         self.non_alchemizable_keywords = config.NON_ALCHEMIZABLE_KEYWORDS
 
-        # Rolling market history for crash risk analysis
-        # Dict[item_id, MarketHistory] containing timestamped snapshots
-        # Automatically expires snapshots older than ~60 minutes
-        self.market_history: Dict[int, MarketHistory] = {}
+        # Generic history store (reusable across all features)
+        # Collects snapshots from current_prices (~4,400 items)
+        # with hybrid volume data from five_min_data when available
+        self.history_store = HistoryStore(max_snapshots=20, max_age_seconds=3900)
 
     def is_alchemizable(self, item_data: Dict) -> bool:
         """
@@ -261,40 +261,46 @@ class OSRSAlchemyFlippingCalculator:
         # Delegate to existing enrichment method (which calls API layer)
         return self.enrich_five_min_with_minimums(item_ids, lookback_periods)
 
-    def collect_market_snapshots(self) -> int:
+    def collect_price_snapshots(self) -> int:
         """
-        Collect market snapshots from current data and add to rolling history.
+        Collect price snapshots from current_prices and add to HistoryStore.
 
-        Should be called after fetch_current_prices() and fetch_five_minute_data()
-        to capture the current market state for crash risk persistence analysis.
+        This is the new generic snapshot collection method that:
+        - Captures ALL items in current_prices (~4,400 items)
+        - Adds hybrid volume data from five_min_data when available
+        - Stores in the generic HistoryStore for reuse across all features
 
-        Creates a snapshot for each item with 5-minute data containing:
-        - Timestamp
-        - Current prices (low/high)
-        - Buy/sell volumes
-        - Volume ratio
-
-        Old snapshots (>60 minutes) are automatically expired.
+        Should be called after fetch_current_prices() during every refresh cycle.
 
         Returns:
             Number of snapshots collected
         """
-        if not self.current_prices or not self.five_min_data:
-            logger.debug("Skipping snapshot collection - missing required data")
+        if not self.current_prices:
+            logger.debug("Skipping price snapshot collection - no current prices")
             return 0
 
         snapshot_count = 0
-        current_timestamp = int(time.time())
+        current_timestamp = time.time()
+        snapshots = {}
 
-        for item_id, five_min_info in self.five_min_data.items():
+        for item_id_str, price_data in self.current_prices.items():
             try:
-                # Extract volume and price data
-                buy_volume = five_min_info.get('high_volume', 0) or 0
-                sell_volume = five_min_info.get('low_volume', 0) or 0
-                avg_low = five_min_info.get('avg_low')
-                avg_high = five_min_info.get('high')
+                item_id = int(item_id_str)
 
-                # Create snapshot
+                # Extract prices from current_prices (always available)
+                avg_low = price_data.get('low')
+                avg_high = price_data.get('high')
+
+                # Try to get volume data from five_min_data (optional)
+                buy_volume = None
+                sell_volume = None
+
+                if item_id in self.five_min_data:
+                    five_min_info = self.five_min_data[item_id]
+                    buy_volume = five_min_info.get('high_volume', 0) or None
+                    sell_volume = five_min_info.get('low_volume', 0) or None
+
+                # Create snapshot with hybrid data
                 snapshot = MarketSnapshot(
                     timestamp=current_timestamp,
                     avg_low=avg_low,
@@ -303,21 +309,19 @@ class OSRSAlchemyFlippingCalculator:
                     sell_volume=sell_volume
                 )
 
-                # Get or create market history for this item
-                if item_id not in self.market_history:
-                    self.market_history[item_id] = MarketHistory(max_snapshots=12)
-
-                # Add snapshot and expire old ones
-                self.market_history[item_id].add_snapshot(snapshot)
-                self.market_history[item_id].expire_old_snapshots(max_age_seconds=3900)
-
+                snapshots[item_id] = snapshot
                 snapshot_count += 1
 
             except Exception as e:
-                logger.warning(f"Error creating snapshot for item {item_id}: {e}")
+                logger.warning(f"Error creating price snapshot for item {item_id_str}: {e}")
                 continue
 
-        logger.debug(f"Collected {snapshot_count} market snapshots")
+        # Batch insert all snapshots
+        if snapshots:
+            self.history_store.add_snapshots_batch(snapshots)
+            self.history_store.expire_old_snapshots()
+
+        logger.debug(f"Collected {snapshot_count} price snapshots (hybrid data)")
         return snapshot_count
 
     def fetch_timeseries(self, item_id: int, timestep: str = "24h") -> List[Dict]:
@@ -783,7 +787,7 @@ class OSRSAlchemyFlippingCalculator:
             self.five_min_data,
             self.volume_data,
             self.current_prices,
-            market_history_data=self.market_history
+            history_store=self.history_store
         )
 
     def analyze_flipping_trend(self, item_id: int) -> Dict:
