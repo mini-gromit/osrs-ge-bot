@@ -164,6 +164,8 @@ class SetupCog(commands.Cog, name="Setup"):
         ('crash_risk_alerts', 'Crash Risk Alerts', '📉', False, 'Market crash alerts for alchemy items'),
         ('flipping_trend_alerts', 'Flipping Trend Alerts', '📈', False, 'Flipping trend alerts'),
         ('best_seen_15m', 'Best Seen (15m)', '⏱️', False, 'Best alchemy opportunities seen in last 15 minutes'),
+        ('status_channel', 'Status Dashboard', '📊', False, 'Live bot health and status dashboard'),
+        ('events_channel', 'Events Notifications', '🔔', False, 'Bot lifecycle events (startup, crashes, recoveries)'),
     ]
 
     @app_commands.command(
@@ -482,6 +484,8 @@ class ConfirmationView(discord.ui.View):
             crash_risk_alerts=self.setup_state['crash_risk_alerts'].id if self.setup_state.get('crash_risk_alerts') else None,
             flipping_trend_alerts=self.setup_state['flipping_trend_alerts'].id if self.setup_state.get('flipping_trend_alerts') else None,
             best_seen_15m=self.setup_state['best_seen_15m'].id if self.setup_state.get('best_seen_15m') else None,
+            status_channel=self.setup_state['status_channel'].id if self.setup_state.get('status_channel') else None,
+            events_channel=self.setup_state['events_channel'].id if self.setup_state.get('events_channel') else None,
         )
 
         # Save to bot and file
@@ -499,6 +503,15 @@ class ConfirmationView(discord.ui.View):
 
         # Start monitoring
         await self.bot.start_monitoring()
+
+        # Initialize status dashboard if status channel was configured
+        if config.status_channel:
+            try:
+                await self._initialize_status_dashboard(config.status_channel)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to initialize status dashboard: {e}")
 
         # Show success message
         embed = discord.Embed(
@@ -529,6 +542,41 @@ class ConfirmationView(discord.ui.View):
         view = ChannelSelectionView(self.bot, self.channel_types, self.setup_state, 0)
         await view.show_current_step(interaction)
 
+    async def _initialize_status_dashboard(self, channel_id: int):
+        """
+        Initialize status dashboard in the configured channel.
+
+        Creates the initial dashboard message and saves its ID.
+        """
+        from monitoring import MonitoringRenderer
+        import logging
+        logger = logging.getLogger(__name__)
+
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            logger.warning(f"Status channel {channel_id} not found")
+            return
+
+        # Get current status
+        status = self.bot.monitoring.get_status()
+
+        # Create status dashboard embed
+        embed = MonitoringRenderer.create_status_dashboard_embed(status)
+
+        # Send initial dashboard message
+        try:
+            msg = await channel.send(embed=embed)
+
+            # Save message ID in config
+            self.bot.channel_config.status_message_id = msg.id
+            await self.bot.save_channel_config()
+
+            logger.info(f"[MONITORING] Created status dashboard in {channel.name} (message ID: {msg.id})")
+
+        except Exception as e:
+            logger.error(f"Failed to send status dashboard: {e}")
+            raise
+
 
 class TestConfigView(discord.ui.View):
     """View for testing configuration after setup"""
@@ -551,12 +599,27 @@ class TestConfigView(discord.ui.View):
             if value:  # Channel is configured
                 channel = value
                 try:
-                    # Send simple test message
-                    test_embed = discord.Embed(
-                        title="🧪 Test Message",
-                        description=f"This is a test message from the OSRS Alchemy Bot.\nChannel type: **{key.replace('_', ' ').title()}**",
-                        color=discord.Color.blue()
-                    )
+                    # Skip status channel - already has dashboard
+                    if key == 'status_channel':
+                        results.append(f"✅ {channel.mention} - Dashboard active")
+                        continue
+
+                    # Send appropriate test message
+                    if key == 'events_channel':
+                        # Send a test event notification
+                        test_embed = discord.Embed(
+                            title="🧪 Test Event",
+                            description="This is a test lifecycle event from the OSRS Alchemy Bot.",
+                            color=discord.Color.blue()
+                        )
+                    else:
+                        # Send simple test message for other channels
+                        test_embed = discord.Embed(
+                            title="🧪 Test Message",
+                            description=f"This is a test message from the OSRS Alchemy Bot.\nChannel type: **{key.replace('_', ' ').title()}**",
+                            color=discord.Color.blue()
+                        )
+
                     await channel.send(embed=test_embed)
                     results.append(f"✅ {channel.mention} - Success")
                 except discord.Forbidden:

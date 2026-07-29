@@ -18,6 +18,7 @@ from renderers import DiscordRenderer
 from scheduler import DataScheduler
 from notifications import AlertPolicy, JsonPreferenceStore, NotificationQueue
 from alerts import history as history_alerts
+from monitoring import MonitoringManager, MonitoringRenderer, run_with_crash_detection
 import config
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class OSRSAlchemyBot(commands.Bot):
         self.scheduler = DataScheduler(self.calculator)
         self.config_manager = ConfigManager()
         self.notification_manager = UserNotificationManager()
+        self.monitoring = MonitoringManager(version="v1.0.1")
 
         # Initialize alert policy layer for notification filtering
         self.preference_store = JsonPreferenceStore(
@@ -52,6 +54,7 @@ class OSRSAlchemyBot(commands.Bot):
         self.channel_config = None
         self.last_update = None
         self.is_monitoring = False
+        self.is_monitoring_dashboard = False
 
         self.persistence_minutes = config.ALERT_PERSISTENCE_MINUTES
 
@@ -98,6 +101,9 @@ class OSRSAlchemyBot(commands.Bot):
         logger.info(f'{self.user} has connected to Discord!')
         logger.info(f'Bot is in {len(self.guilds)} guilds')
 
+        # Mark Discord as connected
+        self.monitoring.mark_discord_success()
+
         # Sync slash commands
         try:
             # Check for development guild ID for instant command sync
@@ -124,6 +130,17 @@ class OSRSAlchemyBot(commands.Bot):
             self.background_refresh_loop.start()
             self.is_refreshing = True
             logger.info(f"Background refresh started (every {config.REFRESH_INTERVAL_CURRENT_PRICES}s)")
+
+        # Start status dashboard update task only if status channel is configured
+        if self.channel_config and self.channel_config.status_channel:
+            if not hasattr(self, 'is_monitoring_dashboard') or not self.is_monitoring_dashboard:
+                logger.info("Starting status dashboard update task...")
+                self.update_status_dashboard.start()
+                self.is_monitoring_dashboard = True
+
+        # Send startup notification to events channel (only if configured)
+        if self.channel_config and self.channel_config.events_channel:
+            await self.send_startup_notification()
 
         if self.channel_config:
             await self.start_monitoring()
@@ -805,12 +822,29 @@ class OSRSAlchemyBot(commands.Bot):
         try:
             # Run synchronous scheduler.refresh_all() in thread pool
             # This includes blocking HTTP requests and historical enrichment
-            await asyncio.to_thread(self.scheduler.refresh_all)
+            success = await asyncio.to_thread(self.scheduler.refresh_all)
+
+            # Report health based on refresh results
+            if success:
+                self.monitoring.mark_scheduler_success()
+                self.monitoring.mark_current_prices_success()
+
+                # Mark five minute data as healthy if we have it
+                if self.calculator.five_min_data:
+                    self.monitoring.mark_five_minute_success()
+
+                # Update metrics
+                items_tracked = len(self.calculator.item_mapping) if self.calculator.item_mapping else 0
+                history_items = self.calculator.history_store.get_item_count() if hasattr(self.calculator, 'history_store') else 0
+                self.monitoring.update_metrics(items_tracked=items_tracked, history_items=history_items)
+            else:
+                self.monitoring.mark_scheduler_failure("Refresh failed")
 
         except Exception as e:
             import traceback
             logger.error(f"Error in background refresh: {e}")
             logger.error(traceback.format_exc())
+            self.monitoring.mark_scheduler_failure(str(e))
 
     @tasks.loop(seconds=config.MONITORING_INTERVAL_SECONDS)
     async def monitor_prices_with_links(self):
@@ -823,6 +857,7 @@ class OSRSAlchemyBot(commands.Bot):
                     f"[MONITOR] fetch_and_analyze() returned invalid result: "
                     f"expected 5-tuple, got {type(result).__name__} with length {len(result) if isinstance(result, tuple) else 'N/A'}"
                 )
+                self.monitoring.mark_alerts_failure("Invalid fetch_and_analyze result")
                 return
 
             super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events = result
@@ -832,16 +867,150 @@ class OSRSAlchemyBot(commands.Bot):
                     super_hot, hot_items, all_alchs, f2p_alchs, alchemy_events
                 )
                 self.last_update = datetime.now()
+                self.monitoring.mark_alerts_success()
+            else:
+                self.monitoring.mark_alerts_failure("No data available")
 
         except ValueError as e:
             logger.error(
                 f"[MONITOR] Tuple unpacking failed - fetch_and_analyze() return value mismatch: {e}",
                 exc_info=True
             )
+            self.monitoring.mark_alerts_failure(str(e))
         except Exception as e:
             import traceback
             logger.error(f"[MONITOR] Unexpected error in monitor loop: {e}")
             logger.error(traceback.format_exc())
+            self.monitoring.mark_alerts_failure(str(e))
+
+    @tasks.loop(minutes=1)
+    async def update_status_dashboard(self):
+        """
+        Update status dashboard periodically.
+
+        Only updates when:
+        - Status changes
+        - Health state changes
+        - Timestamps meaningfully change (once per minute)
+        """
+        try:
+            if not self.channel_config or not self.channel_config.status_channel:
+                return
+
+            # Update Discord connection state based on actual bot status
+            if self.is_ready() and not self.is_closed():
+                self.monitoring.mark_discord_success()
+            else:
+                self.monitoring.mark_discord_failure("Not connected")
+
+            # Get current status
+            status = self.monitoring.get_status()
+
+            # Check if we should update
+            should_update = False
+
+            # Always update on health state changes
+            if self.monitoring.has_state_changed():
+                should_update = True
+                logger.info("[MONITORING] Health state changed - updating status dashboard")
+
+            # Update once per minute for timestamp changes
+            # (This task runs once per minute, so always update timestamps)
+            should_update = True
+
+            if should_update:
+                # Create status embed
+                embed = MonitoringRenderer.create_status_dashboard_embed(status)
+
+                # Get or create persistent message
+                await self.get_or_create_persistent_message(
+                    self.channel_config.status_channel,
+                    self.channel_config.status_message_id,
+                    embed,
+                    "status"
+                )
+
+                # Send health change notifications to events channel
+                await self.send_health_change_notifications()
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Error updating status dashboard: {e}")
+            logger.error(traceback.format_exc())
+
+    async def send_startup_notification(self):
+        """
+        Send startup notification to events channel.
+
+        Sends recovery notification if bot crashed previously.
+        """
+        try:
+            if not self.channel_config or not self.channel_config.events_channel:
+                return
+
+            # Get current status
+            status = self.monitoring.get_status()
+
+            # Check if recovering from crash
+            recovered = self.monitoring.previous_crash
+
+            # Create startup embed
+            embed = MonitoringRenderer.create_startup_event_embed(status, recovered)
+
+            # Send to events channel
+            channel = self.get_channel(self.channel_config.events_channel)
+            if channel:
+                await channel.send(embed=embed)
+                logger.info("[MONITORING] Sent startup notification to events channel")
+
+        except Exception as e:
+            logger.error(f"Error sending startup notification: {e}")
+
+    async def send_health_change_notifications(self):
+        """
+        Send health state change notifications to events channel.
+
+        Only sends when a service changes from one state to another.
+        """
+        try:
+            if not self.channel_config or not self.channel_config.events_channel:
+                return
+
+            # Get state changes
+            changes = self.monitoring.get_state_changes()
+
+            if not changes:
+                return
+
+            # Send notification for each change
+            channel = self.get_channel(self.channel_config.events_channel)
+            if not channel:
+                return
+
+            for service_name, (old_state, new_state) in changes.items():
+                # Get service health
+                service = self.monitoring._services.get(service_name)
+                if not service:
+                    continue
+
+                # Determine time ago
+                time_ago = MonitoringRenderer._format_time_ago(service)
+
+                # Create embed
+                embed = MonitoringRenderer.create_health_change_embed(
+                    service.name,
+                    old_state,
+                    new_state,
+                    time_ago,
+                    service.last_error
+                )
+
+                # Send to events channel
+                await channel.send(embed=embed)
+                logger.info(f"[MONITORING] Sent health change notification: {service.name} {old_state.value} -> {new_state.value}")
+
+        except Exception as e:
+            logger.error(f"Error sending health change notifications: {e}")
 
     async def start_monitoring(self):
         if self.is_monitoring:
@@ -912,7 +1081,7 @@ async def setup_bot():
 
 
 async def main():
-    """Main entry point"""
+    """Main entry point with crash detection"""
     load_dotenv()
 
     # Configure logging
@@ -928,8 +1097,8 @@ async def main():
         logger.error("DISCORD_APP_TOKEN missing")
         exit(1)
 
-    bot = await setup_bot()
-    await bot.start(TOKEN)
+    # Run bot with crash detection and reporting
+    await run_with_crash_detection(setup_bot, TOKEN)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ class ChannelConfig:
     crash_risk_alerts: Optional[int] = None
     flipping_trend_alerts: Optional[int] = None
     best_seen_15m: Optional[int] = None
+    status_channel: Optional[int] = None
+    events_channel: Optional[int] = None
 
     super_hot_message_id: Optional[int] = None
     hot_items_message_id: Optional[int] = None
@@ -27,6 +29,7 @@ class ChannelConfig:
     crash_risk_message_id: Optional[int] = None
     flipping_trend_message_id: Optional[int] = None
     best_seen_15m_message_id: Optional[int] = None
+    status_message_id: Optional[int] = None
 
 
 @dataclass
@@ -64,6 +67,8 @@ class ConfigManager:
                 crash_risk_alerts=data.get('crash_risk_alerts'),
                 flipping_trend_alerts=data.get('flipping_trend_alerts'),
                 best_seen_15m=data.get('best_seen_15m'),
+                status_channel=data.get('status_channel'),
+                events_channel=data.get('events_channel'),
                 super_hot_message_id=data.get('super_hot_message_id'),
                 hot_items_message_id=data.get('hot_items_message_id'),
                 all_alchs_message_id=data.get('all_alchs_message_id'),
@@ -71,7 +76,8 @@ class ConfigManager:
                 opt_in_message_id=data.get('opt_in_message_id'),
                 crash_risk_message_id=data.get('crash_risk_message_id'),
                 flipping_trend_message_id=data.get('flipping_trend_message_id'),
-                best_seen_15m_message_id=data.get('best_seen_15m_message_id')
+                best_seen_15m_message_id=data.get('best_seen_15m_message_id'),
+                status_message_id=data.get('status_message_id')
             )
 
             self.profit_thresholds = ProfitThresholds(
@@ -124,6 +130,8 @@ class ConfigManager:
                 self.channel_config.flipping_trend_message_id = message_id
             elif category == 'best_seen_15m':
                 self.channel_config.best_seen_15m_message_id = message_id
+            elif category == 'status':
+                self.channel_config.status_message_id = message_id
             else:
                 return False
 
