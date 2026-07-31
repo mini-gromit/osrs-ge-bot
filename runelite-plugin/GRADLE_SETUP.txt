@@ -1,0 +1,47 @@
+GRADLE SETUP
+
+The plugin uses Gradle for building. You have two options:
+
+Option 1: Use existing Gradle installation
+----------------------------------------
+If you have Gradle installed:
+
+  gradle build
+
+Option 2: Use Gradle Wrapper (Recommended)
+----------------------------------------
+Initialize Gradle wrapper:
+
+  gradle wrapper --gradle-version 8.5
+
+This creates:
+  - gradlew (Unix/Mac)
+  - gradlew.bat (Windows)
+  - gradle/ directory with wrapper files
+
+Then build with:
+  ./gradlew build       (Unix/Mac)
+  gradlew.bat build     (Windows)
+
+The wrapper ensures everyone uses the same Gradle version.
+
+Building the Plugin
+----------------------------------------
+Once Gradle is set up:
+
+  ./gradlew build
+
+Output JAR location:
+  build/libs/runelite-plugin-1.0.0.jar
+
+Installing to RuneLite
+----------------------------------------
+Copy the JAR to your RuneLite plugins folder:
+
+Windows:
+  %USERPROFILE%\.runelite\plugins\
+
+Mac/Linux:
+  ~/.runelite/plugins/
+
+Then restart RuneLite.

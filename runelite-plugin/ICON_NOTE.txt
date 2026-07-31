@@ -1,0 +1,27 @@
+ICON PLACEHOLDER
+
+The plugin requires an icon file at:
+  src/main/resources/alchemy_icon.png
+
+Recommended specifications:
+- Size: 16x16 or 32x32 pixels
+- Format: PNG with transparency
+- Style: Gold/yellow color scheme (alchemy theme)
+- Suggestions:
+  * Alchemical symbol
+  * Gold coins
+  * High alch spell icon from OSRS
+  * Simple "A" letter in gold
+
+You can:
+1. Create a simple icon using any image editor
+2. Extract the high alch icon from OSRS game files
+3. Use a placeholder gold square for testing
+
+For testing, you can create a simple 32x32 gold square:
+- Background: Transparent
+- Shape: Rounded rectangle or circle
+- Color: #FFD700 (gold)
+- Optional: Add "HA" text in center
+
+Place the file at: src/main/resources/alchemy_icon.png

@@ -9,7 +9,7 @@ All thresholds, magic numbers, and keyword lists should be defined here.
 # ============================================================================
 
 # Cost of nature rune for high alchemy calculations
-NATURE_RUNE_COST = 125
+NATURE_RUNE_COST = 165
 
 # Keywords that indicate an item cannot be alchemized
 NON_ALCHEMIZABLE_KEYWORDS = [
@@ -86,7 +86,7 @@ PRIORITY_MEDIUM_THRESHOLD = 50    # >= 50 = medium priority
 
 # Default user notification preferences
 DEFAULT_MIN_SEVERITY = 50         # Default minimum severity threshold
-DEFAULT_COOLDOWN_MINUTES = 1     # Default cooldown between same-item notifications
+DEFAULT_COOLDOWN_MINUTES = 2     # Default cooldown between same-item notifications
 
 PERSONAL_ALCH_MIN_LIMIT = 20
 PERSONAL_ALCH_MIN_VOLUME = 50
