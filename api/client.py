@@ -1,5 +1,8 @@
 import requests
 from typing import Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OSRSAPIClient:
@@ -81,7 +84,14 @@ class OSRSAPIClient:
         """
         response = self._get_with_cache(self.mapping_url)
         if response:
-            return response.json()
+            data = response.json()
+
+            logger.info(f"Raw mapping count: {len(data)}")
+            logger.info(f"Raw members true: {sum(1 for x in data if x.get('members') is True)}")
+            logger.info(f"Raw members false: {sum(1 for x in data if x.get('members') is False)}")
+
+            return data
+
         return None
 
     def fetch_volume_data(self) -> Optional[Dict]:

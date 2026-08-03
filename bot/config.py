@@ -20,11 +20,13 @@ class ChannelConfig:
     best_seen_15m: Optional[int] = None
     status_channel: Optional[int] = None
     events_channel: Optional[int] = None
+    f2p_flipping_alerts: Optional[int] = None
 
     super_hot_message_id: Optional[int] = None
     hot_items_message_id: Optional[int] = None
     all_alchs_message_id: Optional[int] = None
     f2p_alchs_message_id: Optional[int] = None
+    f2p_flipping_alerts_message_id: Optional[int] = None
     opt_in_message_id: Optional[int] = None
     crash_risk_message_id: Optional[int] = None
     flipping_trend_message_id: Optional[int] = None
@@ -77,7 +79,9 @@ class ConfigManager:
                 crash_risk_message_id=data.get('crash_risk_message_id'),
                 flipping_trend_message_id=data.get('flipping_trend_message_id'),
                 best_seen_15m_message_id=data.get('best_seen_15m_message_id'),
-                status_message_id=data.get('status_message_id')
+                status_message_id=data.get('status_message_id'),
+                f2p_flipping_alerts=data.get('f2p_flipping_alerts'),
+                f2p_flipping_alerts_message_id=data.get('f2p_flipping_alerts_message_id')
             )
 
             self.profit_thresholds = ProfitThresholds(
@@ -132,6 +136,8 @@ class ConfigManager:
                 self.channel_config.best_seen_15m_message_id = message_id
             elif category == 'status':
                 self.channel_config.status_message_id = message_id
+            elif category == 'f2p_flipping_alerts':
+                self.channel_config.f2p_flipping_alerts_message_id = message_id    
             else:
                 return False
 

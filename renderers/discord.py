@@ -351,7 +351,102 @@ class DiscordRenderer:
         )
 
         return embed
-    
+
+    @staticmethod
+    def create_f2p_flipping_alert_embed(
+        alerts: List[FlippingTrendEvent],
+        title: str = "💹 F2P Flipping Opportunities"
+    ) -> discord.Embed:
+        """
+        Compact trading-terminal style flipping embed.
+
+        Shows actionable flipping opportunities with:
+        - Buy/sell prices
+        - Net profit after 2% GE tax
+        - Price trend direction
+        - Volume and liquidity
+        """
+
+        # Only show F2P items
+        alerts = [
+            alert for alert in alerts
+            if not alert.members
+        ]
+
+        statuses = {a.status for a in alerts}
+
+        if "surging" in statuses:
+            color = discord.Color.green()
+        elif "crashing" in statuses:
+            color = discord.Color.red()
+        else:
+            color = discord.Color.gold()
+
+        embed = discord.Embed(
+            title=title,
+            color=color,
+            timestamp=datetime.now()
+        )
+
+        if not alerts:
+            embed.description = "No actionable flipping opportunities at this time."
+            return embed
+
+        lines = []
+
+        # Limit to 8 items to fit Discord embed limits
+        for i, alert in enumerate(alerts[:8], 1):
+
+            ge_url = DiscordRenderer.get_item_ge_tracker_url(
+                item_id=alert.item_id,
+                item_name=alert.name,
+            )
+
+            member = "🏆" if alert.members else "💎"
+
+            # Price trend: show direction with symbols
+            if alert.price_change_percent > 0.1:
+                trend = f"▲{alert.price_change_percent:.1f}%"
+            elif alert.price_change_percent < -0.1:
+                trend = f"▼{abs(alert.price_change_percent):.1f}%"
+            else:
+                trend = "—"
+
+            # Confidence: emoji based on confidence score
+            if alert.confidence_score >= 80:
+                confidence_emoji = "🟢"
+            elif alert.confidence_score >= 60:
+                confidence_emoji = "🟡"
+            elif alert.confidence_score >= 40:
+                confidence_emoji = "🟠"
+            else:
+                confidence_emoji = "🔴"
+
+            # # Format prices compactly
+            # buy_fmt = DiscordRenderer.format_volume_compact(alert.buy_price)
+            # sell_fmt = DiscordRenderer.format_volume_compact(alert.sell_price)
+            vol_fmt = DiscordRenderer.format_volume_compact(alert.hourly_volume)
+
+            # Compact terminal format
+            lines.append(
+                f"**{i}. {member} [{alert.name}]({ge_url})** "
+                f"`{alert.buy_price} → {alert.sell_price}` • "
+                f"`+{alert.net_profit:,} gp` • "
+                f"ROI `{alert.margin_percent:.1f}%` • "
+                f"{trend} • "
+                f"Vol `{vol_fmt}/hr` • "
+                f"{confidence_emoji}{alert.confidence_score}"
+            )
+
+        embed.description = "\n\n".join(lines)
+
+        embed.set_footer(
+            text="Net profit after 2% GE tax • Sorted by opportunity score • Confidence color = signal quality"
+        )
+
+        return embed
+
+
     @staticmethod
     def create_profitable_alchemy_alert_embed(
         alerts: List['ProfitableAlchemyEvent'],

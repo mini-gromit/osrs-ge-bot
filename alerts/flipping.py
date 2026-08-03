@@ -173,6 +173,7 @@ def get_flipping_trend_alerts(
     min_volume: int = 20,
     min_limit: int = None,
     min_hourly_volume: int = None,
+    members: bool | None = None,
     max_alerts: int = 15
 ) -> List[FlippingTrendEvent]:
     """
@@ -223,7 +224,23 @@ def get_flipping_trend_alerts(
         limit=100,
         min_margin=min_margin,
         min_volume=min_volume,
-        fetch_history=False
+        fetch_history=False,
+        members=members,
+    )
+
+    logger.info(
+        f"Top flips breakdown: "
+        f"{sum(1 for f in flips if f.get('members'))} members / "
+        f"{sum(1 for f in flips if not f.get('members'))} F2P"
+    )
+
+    logger.info(
+        "F2P candidates: " +
+        ", ".join(
+            f["name"]
+            for f in flips
+            if not f.get("members")
+        )
     )
 
     logger.info(f"Analyzing {len(flips)} potential flipping opportunities...")
@@ -346,6 +363,10 @@ def get_flipping_trend_alerts(
             margin_percent=flip.get("margin_percent", 0),
             max_profit_per_limit=max_profit_per_limit,
             trade_limit=trade_limit
+        )
+
+        logger.debug(
+            f"Creating flip event: {item_name} members={flip.get('members')}"
         )
 
         event = FlippingTrendEvent(
@@ -530,5 +551,27 @@ def get_flipping_trend_alerts(
 
     alerts.sort(key=calculate_opportunity_score, reverse=True)
 
-    # Return top N alerts (default: 15)
-    return alerts[:max_alerts]
+    # Split by membership type
+    f2p_alerts = [
+        alert for alert in alerts
+        if not alert.members
+    ]
+
+    member_alerts = [
+        alert for alert in alerts
+        if alert.members
+    ]
+
+    # Build final Discord list:
+    # - Up to 3 F2P
+    # - Remaining slots from top overall alerts
+    selected_alerts = f2p_alerts[:3]
+
+    for alert in alerts:
+        if len(selected_alerts) >= 8:
+            break
+
+        if alert not in selected_alerts:
+            selected_alerts.append(alert)
+
+    return selected_alerts

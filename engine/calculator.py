@@ -59,7 +59,22 @@ class OSRSAlchemyFlippingCalculator:
             logger.error("Error fetching item mapping")
             return False
 
+        logger.info(
+            f"Item mapping count: {len(mapping_data)}"
+        )
+        logger.info(
+            f"First item: {mapping_data[0]}"
+        )
+
+        f2p_count = sum(
+            1 for item in self.item_mapping.values()
+            if not item.get("members", False)
+        )
+
+        logger.info(f"Total F2P items in mapping: {f2p_count}")
+
         for item in mapping_data:
+
             self.item_mapping[item['id']] = {
                 'name': item.get('name', 'Unknown'),
                 'examine': item.get('examine', ''),
@@ -419,7 +434,7 @@ class OSRSAlchemyFlippingCalculator:
 
         return profitable_items
 
-    def get_top_flips(self, limit: int = 10, min_margin: int = 200, min_volume: int = 20,
+    def get_top_flips(self, limit: int = 10, min_margin: int = 200, min_volume: int = 20, members: bool | None = None,
                     max_buy_price: int = None, fetch_history: bool = True,
                     max_margin_percent: float = 20.0, exclude_high_risk: bool = True,
                     min_score: int = 30) -> List[Dict]:
@@ -440,6 +455,11 @@ class OSRSAlchemyFlippingCalculator:
                 item = self.item_mapping.get(item_id)
                 if not item:
                     continue
+
+                # Optional membership filter
+                if members is not None and item.get("members", False) != members:
+                    continue
+
 
                 # Use averaged prices for flipping if available
                 price_info = self.get_flipping_prices(item_id)
@@ -515,6 +535,11 @@ class OSRSAlchemyFlippingCalculator:
                     basic_score += 4
                 else:
                     basic_score += 1
+
+                if not item.get("members", False):
+                    logger.info(
+                        f"Adding F2P flip: {item['name']} margin={actual_margin} volume={vol}"
+                    )
 
                 flips.append({
                     "name": item["name"],
@@ -899,15 +924,16 @@ class OSRSAlchemyFlippingCalculator:
             self, min_profit, min_volume_imbalance, min_limit, min_volume
         )
 
-    def get_flipping_alerts(self, min_margin: int = 1000, min_volume: int = 20):
+    def get_flipping_alerts(self, min_margin: int = 1000, min_volume: int = 20, members: bool | None = None):
         """
         Get flipping items with trend alerts.
 
         Args:
             min_margin: Minimum margin to consider
             min_volume: Minimum volume to consider
+            members: Filter by membership status (True for members only, False for F2P only, None for both)
 
         Returns:
             List of FlippingTrendEvent objects
         """
-        return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume)
+        return flipping_alerts.get_flipping_trend_alerts(self, min_margin, min_volume, members=members)

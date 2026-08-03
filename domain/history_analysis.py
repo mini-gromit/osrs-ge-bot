@@ -95,7 +95,7 @@ def calculate_price_trend_minutes(
 
     snapshots = item_history.get_recent_snapshots(lookback_minutes)
 
-    if len(snapshots) < 2:
+    if len(snapshots) < 2: # 
         return None
 
     # Get prices from oldest and newest snapshots

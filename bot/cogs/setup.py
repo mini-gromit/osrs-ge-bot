@@ -166,6 +166,7 @@ class SetupCog(commands.Cog, name="Setup"):
         ('best_seen_15m', 'Best Seen (15m)', '⏱️', False, 'Best alchemy opportunities seen in last 15 minutes'),
         ('status_channel', 'Status Dashboard', '📊', False, 'Live bot health and status dashboard'),
         ('events_channel', 'Events Notifications', '🔔', False, 'Bot lifecycle events (startup, crashes, recoveries)'),
+        ('f2p_flipping_alerts', 'F2P Flipping Alerts', '💹', False, 'Flipping trend alerts for F2P items'),
     ]
 
     @app_commands.command(
@@ -486,6 +487,7 @@ class ConfirmationView(discord.ui.View):
             best_seen_15m=self.setup_state['best_seen_15m'].id if self.setup_state.get('best_seen_15m') else None,
             status_channel=self.setup_state['status_channel'].id if self.setup_state.get('status_channel') else None,
             events_channel=self.setup_state['events_channel'].id if self.setup_state.get('events_channel') else None,
+            f2p_flipping_alerts=self.setup_state['f2p_flipping_alerts'].id if self.setup_state.get('f2p_flipping_alerts') else None,
         )
 
         # Save to bot and file

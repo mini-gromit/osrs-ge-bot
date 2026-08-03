@@ -678,6 +678,25 @@ class OSRSAlchemyBot(commands.Bot):
                     min_volume=20
                 )
 
+                logger.info(
+                    f"Total flipping alerts: {len(flipping_alerts)}"
+                )
+
+                logger.info(
+                    f"Members breakdown: "
+                    f"{sum(1 for a in flipping_alerts if a.members)} members / "
+                    f"{sum(1 for a in flipping_alerts if not a.members)} F2P"
+                )
+
+                f2p_flipping_alerts = [
+                    alert for alert in flipping_alerts
+                    if not alert.members
+                ]
+
+                logger.info(
+                    f"F2P flipping opportunities: {len(f2p_flipping_alerts)}"
+                )
+
                 if flipping_alerts:
                     embed = DiscordRenderer.create_flipping_trend_alert_embed(
                         flipping_alerts,
@@ -693,6 +712,30 @@ class OSRSAlchemyBot(commands.Bot):
 
             except Exception as e:
                 logger.warning(f"Error sending flipping trend alerts: {e}")
+
+        if self.channel_config.f2p_flipping_alerts:
+            try:
+                f2p_flipping_alerts = self.calculator.get_flipping_alerts(
+                    min_margin=500,
+                    min_volume=10,
+                    members=False
+                )
+
+                if f2p_flipping_alerts:
+                    embed = DiscordRenderer.create_flipping_trend_alert_embed(
+                        f2p_flipping_alerts,
+                        "💹 F2P Flipping Market Trend Alerts"
+                    )
+
+                    await self.get_or_create_persistent_message(
+                        self.channel_config.f2p_flipping_alerts,
+                        self.channel_config.f2p_flipping_alerts_message_id,
+                        embed,
+                        "f2p_flipping_alerts"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error sending F2P flipping trend alerts: {e}")
 
         # Fetch best seen 15m historical opportunities if channel configured
         if self.channel_config.best_seen_15m:
