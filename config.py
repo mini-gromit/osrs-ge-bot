@@ -45,7 +45,7 @@ DEFAULT_F2P_ALCHS_MIN_PROFIT = 600
 SUPER_HOT_MAX_ITEMS = 10
 SUPER_HOT_MIN_LIMIT = 9
 SUPER_HOT_MIN_VOLUME = 20
-SUPER_HOT_MAX_ROI = 225
+SUPER_HOT_MAX_ROI = 2250
 
 # Historical enrichment threshold
 # Items with profit >= this value will have historical data enriched during refresh
@@ -90,7 +90,7 @@ DEFAULT_COOLDOWN_MINUTES = 2     # Default cooldown between same-item notificati
 
 PERSONAL_ALCH_MIN_LIMIT = 20
 PERSONAL_ALCH_MIN_VOLUME = 50
-PERSONAL_ALCH_MAX_ROI = 250
+PERSONAL_ALCH_MAX_ROI = 2500
 PERSONAL_ALCH_MAX_BUY_PRICE = None
 
 # Duplicate suppression and cleanup
