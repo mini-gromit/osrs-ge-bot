@@ -24,7 +24,7 @@ EXCLUDED_ITEMS = [
 
 # Hourly volume threshold for ranking penalty
 # Items below this receive reduced ranking score
-DEFAULT_HOURLY_VOLUME_THRESHOLD = 50
+DEFAULT_HOURLY_VOLUME_THRESHOLD = 200
 
 # Trade limit threshold for ranking penalty
 # Items below this receive reduced ranking score
@@ -40,18 +40,18 @@ DEFAULT_MIN_CONFIDENCE = 40
 # These weights determine how different factors contribute to the final ranking
 #
 # Philosophy:
-# - Net profit is the primary driver (50%)
+# - Net profit is the primary driver (35%)
 # - Liquidity ensures you can execute (25%)
 # - Capital efficiency rewards better ROI (15%)
-# - Scalability considers trade limits (8%)
-# - Trend provides small context bonus (2%)
+# - Scalability considers trade limits (15%)
+# - Trend provides small context bonus (10%)
 #
 # Total: 100%
-WEIGHT_NET_PROFIT = 50
+WEIGHT_NET_PROFIT = 35
 WEIGHT_LIQUIDITY = 25
 WEIGHT_CAPITAL_EFFICIENCY = 15
-WEIGHT_SCALABILITY = 8
-WEIGHT_TREND_BONUS = 2
+WEIGHT_SCALABILITY = 15
+WEIGHT_TREND_BONUS = 10
 
 # Trend multipliers for opportunity score
 # Trends provide context but don't dominate ranking
@@ -169,9 +169,9 @@ def _log_filter_diagnostics(diagnostics: Dict[str, Any], final_count: int) -> No
 
 def get_flipping_trend_alerts(
     calculator,
-    min_margin: int = 1000,
+    min_margin: int = 5,
     min_volume: int = 20,
-    min_limit: int = None,
+    min_limit: int = 40,
     min_hourly_volume: int = None,
     members: bool | None = None,
     max_alerts: int = 15
@@ -412,30 +412,17 @@ def get_flipping_trend_alerts(
     if config.DEBUG_FLIPPING_FILTERS:
         _log_filter_diagnostics(diagnostics, len(alerts))
 
-    # Sort by opportunity score
-    # Opportunity quality prioritizes realistic, executable opportunities
-    # Uses weighted scoring across multiple independent factors
-    #
-    # Opportunity Score Formula:
-    # score = (
-    #     (net_profit_score × WEIGHT_NET_PROFIT) +
-    #     (liquidity_score × WEIGHT_LIQUIDITY) +
-    #     (capital_efficiency_score × WEIGHT_CAPITAL_EFFICIENCY) +
-    #     (scalability_score × WEIGHT_SCALABILITY)
-    # ) × trend_multiplier
-    #
-    # Component scores (normalized 0-100):
-    # - net_profit_score: Absolute profit potential
-    # - liquidity_score: Can you actually trade at these prices?
-    # - capital_efficiency_score: Profit per million gp invested
-    # - scalability_score: Trade limit allows volume execution
-    # - trend_multiplier: Small bonus for active trends
-    #
-    # This approach:
-    # - Balances absolute profit with capital efficiency
-    # - Requires realistic liquidity for execution
-    # - Rewards scalable opportunities
-    # - Trend provides context, not dominance
+    # Precompute max hourly profit separately per segment (F2P vs members).
+    # These pools have structurally different gp/hr ceilings — a top F2P flip
+    # will never approach a top members flip in absolute terms, so scoring
+    # them against a single combined max collapses F2P scores no matter how
+    # good the flip is relative to other F2P options.
+    f2p_hourly_profits = [a.estimated_hourly_profit for a in alerts if not a.members]
+    p2p_hourly_profits = [a.estimated_hourly_profit for a in alerts if a.members]
+
+    max_hourly_profit_f2p = max(f2p_hourly_profits, default=0)
+    max_hourly_profit_p2p = max(p2p_hourly_profits, default=0)
+
     def calculate_opportunity_score(event: FlippingTrendEvent) -> float:
         """
         Calculate opportunity quality score for ranking.
@@ -443,19 +430,13 @@ def get_flipping_trend_alerts(
         Returns a composite score balancing profit, liquidity, capital efficiency,
         and scalability. Higher score = better opportunity.
         """
-        # Net profit score (0-100): Normalize based on profit tiers
-        if event.net_profit >= 100000:
-            net_profit_score = 100
-        elif event.net_profit >= 50000:
-            net_profit_score = 80 + (event.net_profit - 50000) / 50000 * 20
-        elif event.net_profit >= 25000:
-            net_profit_score = 60 + (event.net_profit - 25000) / 25000 * 20
-        elif event.net_profit >= 10000:
-            net_profit_score = 40 + (event.net_profit - 10000) / 15000 * 20
-        elif event.net_profit >= 5000:
-            net_profit_score = 20 + (event.net_profit - 5000) / 5000 * 20
+        # Net profit score (0-100): batch-relative WITHIN THE SAME SEGMENT
+        # (F2P competes against F2P, members against members).
+        relevant_max = max_hourly_profit_p2p if event.members else max_hourly_profit_f2p
+        if relevant_max > 0:
+            net_profit_score = min(100, (event.estimated_hourly_profit / relevant_max) * 100)
         else:
-            net_profit_score = max(0, event.net_profit / 5000 * 20)
+            net_profit_score = 0
 
         # Liquidity score (0-100): Based on hourly volume
         if event.hourly_volume >= 500:
@@ -467,13 +448,10 @@ def get_flipping_trend_alerts(
         elif event.hourly_volume >= 50:
             liquidity_score = 40 + (event.hourly_volume - 50) / 50 * 20
         elif event.hourly_volume >= 20:
-            # Low volume: 20-49/hr = 20-40 score
             liquidity_score = 20 + (event.hourly_volume - 20) / 30 * 20
         elif event.hourly_volume >= 5:
-            # Very low volume: 5-19/hr = 5-20 score (severe penalty)
             liquidity_score = 5 + (event.hourly_volume - 5) / 15 * 15
         else:
-            # Near-zero volume: < 5/hr = 1 score (nearly eliminates from ranking)
             liquidity_score = max(1, event.hourly_volume)
 
         # Capital efficiency score (0-100): Profit per million invested
@@ -500,10 +478,8 @@ def get_flipping_trend_alerts(
         elif event.trade_limit >= 5:
             scalability_score = 20 + (event.trade_limit - 5) / 5 * 20
         elif event.trade_limit >= 1:
-            # Very low limits: 1-4 items = 5-15 score (severe penalty)
             scalability_score = 5 + (event.trade_limit - 1) / 4 * 10
         else:
-            # 0 trade limit: score of 1 (nearly eliminates from ranking)
             scalability_score = 1
 
         # Weighted composite score
@@ -515,24 +491,20 @@ def get_flipping_trend_alerts(
         ) / 100
 
         # Quality gate penalties: severe multiplicative penalties for critical deficiencies
-        # These prevent unrealistic opportunities from ranking too high
         quality_multiplier = 1.0
 
-        # Severe penalty for zero/near-zero trade limit (can't execute at scale)
         if event.trade_limit == 0:
-            quality_multiplier *= 0.15  # 85% penalty
+            quality_multiplier *= 0.15
         elif event.trade_limit < 5:
-            quality_multiplier *= 0.50  # 50% penalty
+            quality_multiplier *= 0.50
 
-        # Severe penalty for zero/near-zero volume (can't execute at market prices)
         if event.hourly_volume < 5:
-            quality_multiplier *= 0.15  # 85% penalty
+            quality_multiplier *= 0.15
         elif event.hourly_volume < 20:
-            quality_multiplier *= 0.50  # 50% penalty
+            quality_multiplier *= 0.50
 
-        # Compounding penalty: both low limit AND low volume = even worse
         if event.trade_limit < 5 and event.hourly_volume < 20:
-            quality_multiplier *= 0.30  # Additional 70% penalty for double deficiency
+            quality_multiplier *= 0.30
 
         composite_score *= quality_multiplier
 
@@ -541,16 +513,21 @@ def get_flipping_trend_alerts(
             trend_multiplier = TREND_MULTIPLIER_STRONG
         elif event.status in ("surge_risk", "crash_risk"):
             trend_multiplier = TREND_MULTIPLIER_MODERATE
-        else:  # "stable"
+        else:
             trend_multiplier = TREND_MULTIPLIER_STABLE
 
-        # Apply trend bonus (2% of total weight)
         final_score = composite_score * trend_multiplier
 
         return final_score
 
-    alerts.sort(key=calculate_opportunity_score, reverse=True)
-
+    # Sort by opportunity score, using raw net_profit as a tiebreaker so that
+    # two items tied on hourly-profit-normalized score (e.g. both near the
+    # batch max, or both near zero) still resolve deterministically toward
+    # the higher-margin one.
+    alerts.sort(
+        key=lambda e: (calculate_opportunity_score(e), e.net_profit),
+        reverse=True
+    )
     # Split by membership type
     f2p_alerts = [
         alert for alert in alerts

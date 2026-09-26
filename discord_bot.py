@@ -513,7 +513,7 @@ class OSRSAlchemyBot(commands.Bot):
         try:
             # Fetch flipping trend alerts
             trend_events = self.calculator.get_flipping_alerts(
-                min_margin=1000,
+                min_margin=5,
                 min_volume=20
             )
 
@@ -674,7 +674,7 @@ class OSRSAlchemyBot(commands.Bot):
         if self.channel_config.flipping_trend_alerts:
             try:
                 flipping_alerts = self.calculator.get_flipping_alerts(
-                    min_margin=1000,
+                    min_margin=5,
                     min_volume=20
                 )
 
@@ -716,7 +716,7 @@ class OSRSAlchemyBot(commands.Bot):
         if self.channel_config.f2p_flipping_alerts:
             try:
                 f2p_flipping_alerts = self.calculator.get_flipping_alerts(
-                    min_margin=500,
+                    min_margin=5,
                     min_volume=10,
                     members=False
                 )

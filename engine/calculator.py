@@ -620,9 +620,7 @@ class OSRSAlchemyFlippingCalculator:
         else:
             for flip in flips:
                 flip['score'] = (flip['score'] / 45) * 100
-            # Return without detailed analysis, but still properly scored
-            logger.debug(f"Returning {len(top_candidates[:limit])} items with basic scoring")
-            return top_candidates[:limit]
+            return flips[:limit]   # <-- was top_candidates[:limit]
 
     def get_non_alchemizable_sample(self, sample_size: int = 10) -> List[Dict]:
         """
